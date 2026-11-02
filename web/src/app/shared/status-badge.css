@@ -1,0 +1,35 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: rgba(138, 138, 133, 0.14);
+  color: var(--muted);
+  font: 500 12px var(--mono);
+  white-space: nowrap;
+}
+
+.badge[data-status='done'] {
+  background: rgba(57, 192, 138, 0.14);
+  color: var(--green);
+}
+
+.badge[data-status='partial'] {
+  background: rgba(230, 169, 58, 0.14);
+  color: var(--amber);
+}
+
+.badge[data-status='failed'],
+.badge[data-status='error'] {
+  background: rgba(240, 100, 91, 0.14);
+  color: var(--red);
+}
+
+/* dry run is a dashed outline, so it looks unlike anything that really happened */
+.badge[data-status='dry_run'] {
+  border: 1px dashed rgba(232, 230, 227, 0.6);
+  background: transparent;
+  color: var(--text);
+}

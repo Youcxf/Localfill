@@ -1,0 +1,74 @@
+<div class="page">
+  @if (error()) {
+    <p class="error-box"><strong>error</strong> {{ error() }}</p>
+  }
+
+  @if (settings(); as s) {
+    <section>
+      <div class="about">
+        <h2>Dry run</h2>
+        <p class="muted">
+          When on, alerts are received and logged but no order is sent. Use it to test your TradingView alerts.
+        </p>
+      </div>
+      <div class="seg light" role="radiogroup" aria-label="Dry run">
+        <button type="button" role="radio" [attr.aria-checked]="!s.dry_run" (click)="setDryRun(false)">Off</button>
+        <button type="button" role="radio" [attr.aria-checked]="s.dry_run" (click)="setDryRun(true)">On</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="about">
+        <h2>Webhook URL</h2>
+        <p class="muted">
+          Paste this into the alert's Webhook URL field in TradingView. Treat it like a password: TradingView
+          cannot send headers, so the token is part of the address.
+        </p>
+      </div>
+      <div class="control">
+        <div class="url">
+          <input class="input mono" readonly aria-label="Webhook URL" [value]="shown()" />
+          <button type="button" class="btn tall outline" (click)="reveal.set(!reveal())">
+            {{ reveal() ? 'Hide' : 'Reveal' }}
+          </button>
+          <button type="button" class="btn tall primary" (click)="copyUrl()">
+            {{ copied() === 'url' ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+        @if (!s.webhook_url) {
+          <p class="hint">
+            Set <span class="mono">LOCALFILL_PUBLIC_URL</span> to your tunnel address and the full URL shows up
+            here.
+          </p>
+        }
+        <div class="regenerate">
+          <p class="muted">
+            Need a new address? The old one stops working immediately, so every TradingView alert that uses it
+            has to be updated.
+          </p>
+          <button type="button" class="btn outline-danger" (click)="regenerate()">Regenerate URL</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="about">
+        <h2>Alert messages</h2>
+        <p class="muted">Paste one of these into the alert's Message field.</p>
+      </div>
+      <div class="control snippets">
+        @for (snippet of snippets; track snippet.title) {
+          <div class="snippet">
+            <div class="snippet-head">
+              <span class="name">{{ snippet.title }}</span>
+              <button type="button" class="link" (click)="copy(snippet.code, snippet.title)">
+                {{ copied() === snippet.title ? 'Copied' : 'Copy' }}
+              </button>
+            </div>
+            <pre class="mono">{{ snippet.code }}</pre>
+          </div>
+        }
+      </div>
+    </section>
+  }
+</div>

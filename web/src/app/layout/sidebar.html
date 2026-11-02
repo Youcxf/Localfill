@@ -1,0 +1,19 @@
+<aside>
+  <div class="logo">
+    <app-logo [width]="124" />
+  </div>
+
+  <nav aria-label="Main">
+    @for (item of items; track item.path) {
+      <a [routerLink]="item.path" routerLinkActive="active">{{ item.label }}</a>
+    }
+  </nav>
+
+  <div class="bottom">
+    <p class="online">{{ online() }}</p>
+    <button type="button" (click)="logout()">Log out</button>
+    @if (version()) {
+      <span class="version mono">v{{ version() }}</span>
+    }
+  </div>
+</aside>

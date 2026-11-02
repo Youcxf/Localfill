@@ -1,0 +1,69 @@
+<div class="page">
+  <div class="hero">
+    <span class="muted">Realized today</span>
+    <span class="figure" [class]="figureColor()">{{ figure() }}</span>
+    @if (accounts().length) {
+      <span class="muted">{{ summary() }}</span>
+    }
+  </div>
+
+  @if (accounts().length) {
+    <div class="tables">
+      <div>
+        <h2>Accounts</h2>
+        <div class="row head">
+          <span>Login</span>
+          <span>Account</span>
+          <span class="right">Realized</span>
+          <span class="right">Trips</span>
+        </div>
+        @for (account of accounts(); track account.key) {
+          <button
+            type="button"
+            class="row pick"
+            [class.selected]="account.key === selected()?.key"
+            (click)="pickedKey.set(account.key)"
+          >
+            <span class="muted">{{ account.connection }}</span>
+            <span class="mono name">{{ account.name }}</span>
+            <span class="mono right pnl" [class]="account.pnl === null ? 'muted' : account.pnl < 0 ? 'red' : 'green'">
+              {{ money(account.pnl) }}
+            </span>
+            <span class="mono right">{{ account.pairs.length }}</span>
+          </button>
+        }
+        <p class="note muted">Realized P/L comes straight from Tradovate.</p>
+      </div>
+
+      <div>
+        <h2>
+          Round trips
+          <span class="mono muted">{{ selected()?.name }}</span>
+        </h2>
+        <div class="row head trip">
+          <span>Time</span>
+          <span class="right">Buy</span>
+          <span class="right">Sell</span>
+          <span class="right">Qty</span>
+          <span class="right">Points</span>
+        </div>
+        @for (trip of trips(); track $index) {
+          <div class="row trip mono">
+            <span class="muted">{{ trip.time }}</span>
+            <span class="right">{{ trip.buy }}</span>
+            <span class="right">{{ trip.sell }}</span>
+            <span class="right">{{ trip.qty }}</span>
+            <strong class="right" [class]="trip.color">{{ trip.points }}</strong>
+          </div>
+        } @empty {
+          <p class="empty muted">No round trips closed on this account today.</p>
+        }
+        <p class="note muted">Points are the sell price minus the buy price. Times are UTC.</p>
+      </div>
+    </div>
+  } @else if (loaded()) {
+    <p class="empty muted">
+      No accounts to show yet. <a routerLink="/connections">Add a connection</a> first.
+    </p>
+  }
+</div>

@@ -1,0 +1,85 @@
+.page {
+  padding: 20px 24px 40px;
+}
+
+/* a plain line with a colored word, not a box with an icon */
+.notice {
+  margin-bottom: 20px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.notice strong {
+  margin-right: 6px;
+  font-weight: 600;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.error-box {
+  margin-bottom: 16px;
+}
+
+.last {
+  margin-bottom: 16px;
+}
+
+.last strong {
+  font-weight: 600;
+}
+
+section {
+  margin-bottom: 20px;
+  border-top: 1px solid var(--rule-strong);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.contract {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.old {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn.small {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 90px 90px;
+  column-gap: 16px;
+  align-items: center;
+  height: 38px;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.account {
+  font-weight: 500;
+}
+
+.qty {
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+}

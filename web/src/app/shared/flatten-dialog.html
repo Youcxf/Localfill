@@ -1,0 +1,20 @@
+<dialog #box class="modal" aria-labelledby="flatten-title" (cancel)="cancelled.emit()">
+  <h1 id="flatten-title">{{ title() }}</h1>
+  <p class="text muted">{{ text() }}</p>
+
+  <div class="lines mono">
+    @for (line of lines(); track line.name) {
+      <div class="line">
+        <span>{{ line.name }}</span>
+        <strong>{{ line.net }}</strong>
+      </div>
+    }
+  </div>
+
+  <div class="actions">
+    <button type="button" class="link quiet" (click)="cancelled.emit()">Cancel</button>
+    <button type="button" class="btn tall danger" [disabled]="busy()" (click)="confirmed.emit()">
+      {{ busy() ? 'Flattening…' : confirmLabel() }}
+    </button>
+  </div>
+</dialog>

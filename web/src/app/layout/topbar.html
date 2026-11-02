@@ -1,0 +1,21 @@
+<header [class.dry]="dry()">
+  <h1>{{ title() }}</h1>
+
+  @if (dry()) {
+    <div class="note">
+      <strong class="mono">Dry run</strong>
+      <span>Alerts are logged, no orders are sent</span>
+    </div>
+  }
+
+  <div class="grow"></div>
+
+  @if (dry()) {
+    <button type="button" class="off" (click)="turnOffDryRun()">Turn off dry run</button>
+  }
+
+  <div class="live">
+    <span class="dot" [class.lost]="!connected()"></span>
+    <span>{{ connected() ? 'Live updates' : 'Reconnecting…' }}</span>
+  </div>
+</header>

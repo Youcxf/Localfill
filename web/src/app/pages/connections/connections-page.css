@@ -1,0 +1,109 @@
+.page {
+  padding: 20px 24px 40px;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 20px;
+}
+
+/* one login is one block: who it is on the left, its accounts on the right */
+article {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  column-gap: 40px;
+  padding: 20px 0;
+  border-top: 1px solid var(--rule);
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.who .mono {
+  font-size: 12px;
+}
+
+.who strong {
+  font-weight: 600;
+}
+
+.status {
+  line-height: 1.5;
+}
+
+.status span {
+  display: block;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.detail {
+  min-width: 0;
+}
+
+.detail .error-box {
+  margin-bottom: 12px;
+}
+
+.hint {
+  margin-bottom: 10px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 120px 130px;
+  column-gap: 12px;
+  align-items: center;
+  height: 36px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 12px;
+}
+
+.row.head {
+  height: 28px;
+  border-top: 0;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* the tick box is a plain square, filled blue when the account gets orders */
+.box {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+  background: transparent;
+}
+
+.box[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.empty {
+  padding: 32px 0;
+  border-top: 1px solid var(--rule);
+  line-height: 1.5;
+}

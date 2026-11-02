@@ -1,0 +1,108 @@
+.page {
+  padding: 28px 24px 40px;
+}
+
+/* one big number, the way a broker statement leads with the total */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 32px;
+}
+
+.figure {
+  font-size: 60px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.tables {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  column-gap: 48px;
+  align-items: start;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule-strong);
+}
+
+h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+h2 .mono {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) 92px 48px;
+  column-gap: 12px;
+  align-items: center;
+  width: 100%;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--rule-soft);
+  background: transparent;
+  text-align: left;
+}
+
+.row.trip {
+  grid-template-columns: 68px minmax(0, 1fr) minmax(0, 1fr) 36px 72px;
+  height: 38px;
+  font-size: 13px;
+}
+
+.row.head {
+  height: 28px;
+  border-top: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.row.pick:hover,
+.row.pick.selected {
+  background: var(--bg-hover);
+}
+
+.row.pick.selected .name {
+  color: var(--accent);
+}
+
+.name,
+.pnl {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pnl {
+  font-weight: 600;
+}
+
+.right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-size: 13px;
+}
+
+.note {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.empty {
+  padding: 12px 0;
+  line-height: 1.5;
+}

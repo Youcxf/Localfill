@@ -1,0 +1,91 @@
+<dialog #box class="modal" aria-labelledby="add-title" (cancel)="cancelled.emit()">
+  <form (ngSubmit)="submit()">
+    <div class="head">
+      <h1 id="add-title">Add connection</h1>
+      <button type="button" class="link quiet" (click)="cancelled.emit()">Close</button>
+    </div>
+
+    @if (error()) {
+      <p class="error-box" role="alert"><strong>error</strong> {{ error() }}</p>
+    }
+
+    <div class="field">
+      <label for="label">Label</label>
+      <input id="label" name="label" class="input" autocomplete="off" [(ngModel)]="label" />
+      <span class="hint">Any name you like. Orders can be sent to one connection by this label.</span>
+    </div>
+
+    <div class="two">
+      <div class="field">
+        <label for="username">Tradovate username</label>
+        <input id="username" name="username" class="input" autocomplete="off" [(ngModel)]="username" />
+      </div>
+      <div class="field">
+        <label for="password">Tradovate password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          class="input"
+          placeholder="Your Tradovate password"
+          autocomplete="off"
+          [(ngModel)]="password"
+        />
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="field">
+        <span class="label" id="env-label">Environment</span>
+        <div class="seg" role="radiogroup" aria-labelledby="env-label">
+          <button type="button" role="radio" [attr.aria-checked]="!live()" (click)="live.set(false)">Demo</button>
+          <button type="button" role="radio" [attr.aria-checked]="live()" (click)="live.set(true)">Live</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label" id="mode-label">Login method</span>
+        <div class="seg" role="radiogroup" aria-labelledby="mode-label">
+          <button type="button" role="radio" [attr.aria-checked]="!apiKey()" (click)="apiKey.set(false)">
+            Web login
+          </button>
+          <button type="button" role="radio" [attr.aria-checked]="apiKey()" (click)="apiKey.set(true)">
+            API key
+          </button>
+        </div>
+      </div>
+    </div>
+
+    @if (apiKey()) {
+      <div class="two">
+        <div class="field">
+          <label for="cid">API key cid</label>
+          <input id="cid" name="cid" class="input mono" autocomplete="off" [(ngModel)]="cid" />
+        </div>
+        <div class="field">
+          <label for="secret">API key secret</label>
+          <input
+            id="secret"
+            name="secret"
+            type="password"
+            class="input mono"
+            autocomplete="off"
+            [(ngModel)]="apiSecret"
+          />
+        </div>
+      </div>
+    }
+
+    <p class="hint">
+      Web login works without an API subscription. It logs in the way Tradovate's own website does. API key
+      is the official way and needs a cid and secret from your Tradovate API key.
+    </p>
+
+    <div class="foot">
+      <span class="hint">localfill logs in first. Nothing is saved if the login fails.</span>
+      <button type="button" class="link quiet" (click)="cancelled.emit()">Cancel</button>
+      <button type="submit" class="btn tall primary" [disabled]="busy()">
+        {{ busy() ? 'Logging in…' : 'Log in and save' }}
+      </button>
+    </div>
+  </form>
+</dialog>

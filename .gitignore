@@ -1,0 +1,30 @@
+# secrets and local data. never commit these
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+
+# python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# angular
+web/node_modules/
+web/dist/
+web/.angular/
+web/public/logo.png
+web/public/icon.png
+
+# editors and os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# the avolta font zip (license unclear) and scratch files
+*.zip
+.tmp-run/

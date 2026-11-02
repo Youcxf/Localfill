@@ -1,0 +1,18 @@
+.shell {
+  display: flex;
+  height: 100vh;
+}
+
+.column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* only the page scrolls, the sidebar and the top bar stay where they are */
+main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}

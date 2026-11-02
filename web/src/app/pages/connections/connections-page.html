@@ -1,0 +1,83 @@
+<div class="page">
+  <div class="top">
+    <p class="muted">{{ summary() }}</p>
+    <button type="button" class="btn primary" (click)="showAdd.set(true)">Add connection</button>
+  </div>
+
+  @for (card of cards(); track card.label) {
+    <article>
+      <div class="who">
+        <h2>{{ card.label }}</h2>
+        <p class="mono muted">
+          <strong [class.amber]="card.env === 'LIVE'">{{ card.env }}</strong> · {{ card.mode }}
+        </p>
+        <p class="status">
+          <strong [class]="card.online ? 'green' : 'red'">{{ card.status }}</strong>
+          <span class="muted">{{ card.note }}</span>
+        </p>
+        <div class="actions">
+          <button
+            type="button"
+            class="link plain"
+            [attr.aria-label]="'Reconnect ' + card.label"
+            [disabled]="busy() === card.label"
+            (click)="reconnect(card)"
+          >
+            {{ busy() === card.label ? 'Logging in…' : 'Reconnect' }}
+          </button>
+          <button type="button" class="link danger" [attr.aria-label]="'Remove ' + card.label" (click)="remove(card)">
+            Remove
+          </button>
+        </div>
+      </div>
+
+      <div class="detail">
+        @if (problems()[card.label] || (!card.online && card.error)) {
+          <p class="error-box"><strong>error</strong> {{ problems()[card.label] || card.error }}</p>
+        }
+
+        @if (card.accounts.length) {
+          <p class="hint">Ticked accounts receive orders. If none are ticked, every active account does.</p>
+          <div class="table">
+            <div class="row head">
+              <span></span>
+              <span>Account</span>
+              <span>ID</span>
+              <span>Orders</span>
+            </div>
+            @for (account of card.accounts; track account.id) {
+              <div class="row">
+                <button
+                  type="button"
+                  class="box"
+                  role="checkbox"
+                  [attr.aria-checked]="account.is_target"
+                  [attr.aria-label]="'Send orders to ' + account.name"
+                  (click)="toggle(card, account)"
+                ></button>
+                <span class="mono name">{{ account.name }}</span>
+                <span class="mono muted">{{ account.id }}</span>
+                <span [class.muted]="!account.is_target">
+                  {{ account.is_target ? 'receives orders' : 'skipped' }}
+                </span>
+              </div>
+            }
+          </div>
+        } @else if (!card.online) {
+          <p class="hint">No accounts are loaded until the login works.</p>
+        }
+      </div>
+    </article>
+  } @empty {
+    @if (loaded()) {
+      <p class="empty muted">
+        No Tradovate logins yet. Add one and localfill will log in, find its accounts and start sending them
+        your alerts.
+      </p>
+    }
+  }
+</div>
+
+@if (showAdd()) {
+  <app-add-connection-dialog (saved)="added()" (cancelled)="showAdd.set(false)" />
+}

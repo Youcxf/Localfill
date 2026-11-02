@@ -1,0 +1,35 @@
+<app-auth-frame>
+  <form (ngSubmit)="submit()">
+    <div class="head">
+      <h1>Sign in</h1>
+      <p class="muted">Enter the dashboard password.</p>
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        class="input tall"
+        [class.invalid]="error()"
+        placeholder="Your dashboard password"
+        autocomplete="current-password"
+        autofocus
+        [(ngModel)]="password"
+      />
+      @if (error()) {
+        <p class="error-box"><strong>error</strong> {{ error() }}</p>
+      }
+    </div>
+
+    <button type="submit" class="btn primary tall wide" [disabled]="busy()">
+      {{ busy() ? 'Signing in…' : 'Sign in' }}
+    </button>
+
+    <div class="forgot">
+      <span>Forgot it? Run this on the machine where localfill runs, then restart it and choose a new one.</span>
+      <code>docker compose exec localfill python -m app.reset_password</code>
+    </div>
+  </form>
+</app-auth-frame>

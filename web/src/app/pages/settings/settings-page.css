@@ -1,0 +1,110 @@
+.page {
+  padding: 0 24px 40px;
+}
+
+.error-box {
+  margin-top: 20px;
+}
+
+/* every setting is a row: what it is on the left, the control on the right */
+section {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  column-gap: 48px;
+  align-items: start;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+section:last-child {
+  border-bottom: 0;
+}
+
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.about p {
+  line-height: 1.5;
+}
+
+.seg {
+  width: 144px;
+}
+
+.seg button {
+  height: 34px;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+}
+
+.url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.url .input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.regenerate {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.regenerate p {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.regenerate .btn {
+  flex-shrink: 0;
+}
+
+.snippets {
+  gap: 18px;
+}
+
+.snippet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snippet-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.name {
+  font-weight: 500;
+}
+
+pre {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--bg-field);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

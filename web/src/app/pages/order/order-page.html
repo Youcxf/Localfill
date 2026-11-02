@@ -1,0 +1,181 @@
+<div class="page">
+  <form (ngSubmit)="send()">
+    <div class="field">
+      <span class="label" id="action-label">Action</span>
+      <div
+        class="seg"
+        role="radiogroup"
+        aria-labelledby="action-label"
+        [class.green]="action() === 'buy'"
+        [class.red]="action() === 'sell'"
+        [class.light]="action() === 'flatten'"
+      >
+        <button type="button" role="radio" [attr.aria-checked]="action() === 'buy'" (click)="action.set('buy')">Buy</button>
+        <button type="button" role="radio" [attr.aria-checked]="action() === 'sell'" (click)="action.set('sell')">Sell</button>
+        <button type="button" role="radio" [attr.aria-checked]="action() === 'flatten'" (click)="action.set('flatten')">
+          Flatten
+        </button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="symbol">Symbol</label>
+      <input
+        id="symbol"
+        name="symbol"
+        class="input mono"
+        placeholder="MNQ"
+        autocomplete="off"
+        [class.invalid]="error() && !symbol().trim() && !isFlatten()"
+        [(ngModel)]="symbol"
+      />
+      <span class="hint">
+        Sends to the current front month. Also accepts MNQ1! and full contracts like
+        <span class="mono">MNQZ6</span>.
+        @if (isFlatten()) {
+          For a flatten, leave it empty to close everything.
+        }
+      </span>
+    </div>
+
+    <div class="two">
+      <div class="field">
+        <label for="qty">Quantity</label>
+        <input
+          id="qty"
+          name="qty"
+          type="number"
+          min="1"
+          step="1"
+          class="input mono"
+          [disabled]="isFlatten()"
+          [(ngModel)]="qty"
+        />
+      </div>
+      <div class="field">
+        <span class="label" id="type-label">Order type</span>
+        <div class="seg" role="radiogroup" aria-labelledby="type-label">
+          <button type="button" role="radio" [disabled]="isFlatten()" [attr.aria-checked]="orderType() === 'market'" (click)="orderType.set('market')">
+            Market
+          </button>
+          <button type="button" role="radio" [disabled]="isFlatten()" [attr.aria-checked]="orderType() === 'limit'" (click)="orderType.set('limit')">
+            Limit
+          </button>
+          <button type="button" role="radio" [disabled]="isFlatten()" [attr.aria-checked]="orderType() === 'stop'" (click)="orderType.set('stop')">
+            Stop
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="price" [class.muted]="!needsPrice()">Price</label>
+      <input
+        id="price"
+        name="price"
+        class="input mono"
+        inputmode="decimal"
+        autocomplete="off"
+        [placeholder]="needsPrice() ? 'The limit or stop price' : 'Not used for market orders'"
+        [disabled]="!needsPrice()"
+        [(ngModel)]="price"
+      />
+    </div>
+
+    <div class="field">
+      <label for="connection">Connection</label>
+      <select id="connection" name="connection" class="input" [(ngModel)]="connection">
+        <option value="">All connections ({{ connections().length }})</option>
+        @for (c of connections(); track c.label) {
+          <option [value]="c.label">{{ c.label }} ({{ c.accounts.length }})</option>
+        }
+      </select>
+    </div>
+
+    <p class="summary">
+      Sends <strong>{{ what() }}</strong> {{ how() }} to {{ targets().accounts }}
+      account{{ targets().accounts === 1 ? '' : 's' }} on {{ targets().connections }}
+      connection{{ targets().connections === 1 ? '' : 's' }}.
+      @if (targets().live) {
+        <strong class="amber">LIVE</strong> accounts get real orders.
+      }
+    </p>
+
+    @if (error()) {
+      <p class="error-box"><strong>error</strong> {{ error() }}</p>
+    }
+
+    <div class="buttons">
+      <button
+        type="submit"
+        class="btn tall"
+        [class.green]="action() === 'buy'"
+        [class.red]="action() === 'sell'"
+        [class.danger]="action() === 'flatten'"
+        [disabled]="sending()"
+      >
+        {{ sending() ? 'Waiting for Tradovate…' : action() === 'flatten' ? 'Flatten' : 'Send ' + action() + ' order' }}
+      </button>
+      <button type="button" class="link quiet" (click)="reset()">Reset</button>
+    </div>
+  </form>
+
+  <section aria-label="Last order">
+    @if (detail(); as d) {
+      <div class="title">
+        <h2>Last order</h2>
+        <app-status-badge [status]="d.status" />
+      </div>
+
+      <dl class="mono">
+        <dt class="muted">signal</dt>
+        <dd>#{{ d.id }} · {{ d.source }} · {{ d.when }}</dd>
+        <dt class="muted">sent</dt>
+        <dd>{{ sent() }}</dd>
+        @for (item of d.request; track item.k) {
+          @if (item.k === 'contract') {
+            <dt class="muted">contract</dt>
+            <dd>{{ item.v }}</dd>
+          }
+        }
+      </dl>
+
+      @if (d.message) {
+        <p class="note"><strong class="amber">Message</strong> {{ d.message }}</p>
+      }
+      @for (warning of d.warnings; track warning) {
+        <p class="note"><strong class="amber">Warning</strong> {{ warning }}</p>
+      }
+
+      @if (d.results.length) {
+        <div>
+          <h3 class="muted">{{ d.resultTitle }}</h3>
+          @for (r of d.results; track r.account) {
+            <div class="account">
+              <div class="who">
+                <strong class="mono">{{ r.account }}</strong>
+                <span class="muted">{{ r.connection }}</span>
+                <span class="grow"></span>
+                <span class="mono muted">{{ r.latency }}</span>
+              </div>
+              <div class="mono">
+                <strong [class]="r.color">{{ r.outcome }}</strong>
+                {{ r.detail }}
+              </div>
+            </div>
+          }
+        </div>
+      }
+    } @else {
+      <div class="title">
+        <h2>Last order</h2>
+      </div>
+      <p class="muted">Nothing sent from this page yet.</p>
+    }
+
+    <p class="note muted">
+      Orders from this page wait until every account has answered, so the result shows up here as soon as it
+      is ready.
+    </p>
+  </section>
+</div>

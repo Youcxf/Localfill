@@ -1,0 +1,66 @@
+aside {
+  display: flex;
+  flex-direction: column;
+  width: 232px;
+  height: 100%;
+  padding: 20px 12px;
+  border-right: 1px solid var(--rule);
+  background: var(--bg-side);
+}
+
+/* room above and below the logo */
+.logo {
+  padding: 8px 10px 33px;
+}
+
+nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+a,
+button {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted);
+  font: 400 17px/1 var(--serif);
+  text-align: left;
+  text-decoration: none;
+}
+
+a:hover,
+button:hover {
+  color: var(--text);
+}
+
+/* the page you are on is a solid blue block */
+a.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+}
+
+.online {
+  padding: 0 10px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.version {
+  padding: 6px 10px 0;
+  font-size: 12px;
+  color: var(--muted);
+}

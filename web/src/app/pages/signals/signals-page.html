@@ -1,0 +1,121 @@
+<div class="page">
+  <section class="list">
+    <div class="tabs" role="group" aria-label="Filter by status">
+      @for (tab of tabs; track tab.key) {
+        <button type="button" [attr.aria-pressed]="filter() === tab.key" (click)="pick(tab.key)">
+          <span>{{ tab.label }}</span>
+          <span class="count mono">{{ countOf(tab.key) }}</span>
+        </button>
+      }
+    </div>
+
+    <div class="scroll">
+      <div class="head grid">
+        <span>ID</span>
+        <span>Received</span>
+        <span>Signal</span>
+        <span>Accts</span>
+        <span>Fill</span>
+        <span>Status</span>
+      </div>
+
+      @for (row of rows(); track row.id) {
+        <button type="button" class="row grid" [class.selected]="row.id === detail()?.id" (click)="select(row.id)">
+          <span class="id mono">#{{ row.id }}</span>
+          <span class="when">
+            <span class="mono">{{ row.time }}</span>
+            <span class="muted">{{ row.source }}</span>
+          </span>
+          <span class="what">
+            <span class="line">
+              <strong class="mono" [class]="row.actionColor">{{ row.action }}</strong>
+              <span class="detail">{{ row.detail }}</span>
+              <span class="mono muted">{{ row.contract }}</span>
+            </span>
+            @if (row.message) {
+              <span class="message muted">{{ row.message }}</span>
+            }
+          </span>
+          <span class="mono">{{ row.accounts }}</span>
+          <span class="mono fill">{{ row.fill }}</span>
+          <app-status-badge [status]="row.status" />
+        </button>
+      }
+
+      @if (!loading() && rows().length === 0) {
+        <p class="empty muted">
+          No signals here yet. They show up as soon as TradingView sends an alert, or when you send an order from
+          Manual order.
+        </p>
+      }
+
+      <div class="foot muted">
+        <span>Showing the newest {{ rows().length }} of {{ total() }} signals</span>
+        @if (hasMore()) {
+          <button type="button" class="link" (click)="loadOlder()">Load older</button>
+        }
+      </div>
+    </div>
+  </section>
+
+  <aside aria-label="Signal details">
+    @if (detail(); as d) {
+      <div class="title">
+        <h2>Signal #{{ d.id }}</h2>
+        <app-status-badge [status]="d.status" />
+        <span class="grow"></span>
+        <button type="button" class="link quiet" (click)="selectedId.set(null)">Close</button>
+      </div>
+      <p class="when mono muted">{{ d.when }} · {{ d.source }}</p>
+
+      <section>
+        <h3 class="muted">Request</h3>
+        <dl class="mono">
+          @for (item of d.request; track item.k) {
+            <dt class="muted">{{ item.k }}</dt>
+            <dd>{{ item.v }}</dd>
+          }
+        </dl>
+      </section>
+
+      @if (d.message) {
+        <p class="note"><strong class="amber">Message</strong> {{ d.message }}</p>
+      }
+
+      @for (warning of d.warnings; track warning) {
+        <p class="note"><strong class="amber">Warning</strong> {{ warning }}</p>
+      }
+
+      @if (d.results.length) {
+        <section>
+          <h3 class="muted">{{ d.resultTitle }}</h3>
+          @for (r of d.results; track r.account) {
+            <div class="account">
+              <div class="who">
+                <strong class="mono">{{ r.account }}</strong>
+                <span class="muted">{{ r.connection }}</span>
+                <span class="grow"></span>
+                <span class="mono muted">{{ r.latency }}</span>
+              </div>
+              <div class="mono">
+                <strong [class]="r.color">{{ r.outcome }}</strong>
+                {{ r.detail }}
+              </div>
+            </div>
+          }
+        </section>
+      }
+
+      @if (d.raw) {
+        <button type="button" class="link" (click)="showRaw.set(!showRaw())">
+          {{ showRaw() ? 'Hide' : 'Show' }} raw Tradovate response
+        </button>
+        @if (showRaw()) {
+          <pre class="raw mono">{{ d.raw }}</pre>
+        }
+      }
+    } @else {
+      <p class="muted">Pick a signal to see what happened on each account.</p>
+    }
+  </aside>
+</div>

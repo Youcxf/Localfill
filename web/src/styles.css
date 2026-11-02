@@ -1,0 +1,324 @@
+/* fonts, self-hosted from npm so the dashboard never calls another site */
+@import '@fontsource/libre-franklin/latin-400.css';
+@import '@fontsource/libre-franklin/latin-500.css';
+@import '@fontsource/libre-franklin/latin-600.css';
+@import '@fontsource/chivo-mono/latin-400.css';
+@import '@fontsource/chivo-mono/latin-500.css';
+@import '@fontsource/chivo-mono/latin-600.css';
+@import '@fontsource/rufina/latin-400.css';
+
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #0a0a0a;
+  --bg-side: #070707;
+  --bg-pane: #0d0d0d;
+  --bg-field: #0e0e0e;
+  --bg-dialog: #0f0f0f;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+
+  /* lines, all thin and low contrast */
+  --rule: rgba(255, 255, 255, 0.08);
+  --rule-soft: rgba(255, 255, 255, 0.06);
+  --rule-strong: rgba(255, 255, 255, 0.14);
+  --line: rgba(255, 255, 255, 0.18);
+
+  /* text */
+  --text: #e8e6e3;
+  --muted: #8a8a85;
+  --soft: #a8a8a2;
+
+  /* colors. blue is the brand, the others only mean something (good, careful, bad) */
+  --accent: #257fff;
+  --accent-hover: #5c9cff;
+  --on-accent: #050505;
+  --green: #39c08a;
+  --amber: #e6a93a;
+  --red: #f0645b;
+  --danger: #c8372e;
+
+  /* type */
+  --sans: 'Libre Franklin', system-ui, sans-serif;
+  --mono: 'Chivo Mono', monospace;
+  --serif: 'Rufina', Georgia, serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 13px/1.4 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(37, 127, 255, 0.45);
+}
+
+/* small helpers */
+.mono {
+  font-family: var(--mono);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.green {
+  color: var(--green);
+}
+
+.amber {
+  color: var(--amber);
+}
+
+.red {
+  color: var(--red);
+}
+
+/* buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn.tall {
+  height: 38px;
+  padding: 0 18px;
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn.green {
+  background: var(--green);
+  color: var(--on-accent);
+}
+
+.btn.red {
+  background: var(--red);
+  color: var(--on-accent);
+}
+
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn.outline {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.btn.outline-danger {
+  border: 1px solid rgba(240, 100, 91, 0.6);
+  background: transparent;
+  color: var(--red);
+}
+
+/* a button that looks like an underlined link */
+.link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link.plain {
+  color: var(--text);
+}
+
+.link.quiet {
+  color: var(--muted);
+}
+
+.link.danger {
+  color: var(--red);
+}
+
+/* form fields */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field > label,
+.field > .label {
+  font-weight: 500;
+}
+
+.input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg-field);
+  font-size: 14px;
+}
+
+.input.mono {
+  font-family: var(--mono);
+}
+
+.input.tall {
+  height: 40px;
+}
+
+.input.invalid {
+  border-color: var(--red);
+}
+
+.input:disabled {
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--muted);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* a group of buttons where exactly one is picked (buy / sell / flatten) */
+.seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.seg button {
+  height: 36px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  color: var(--soft);
+  font-weight: 500;
+}
+
+.seg button:first-child {
+  border-left: 0;
+}
+
+.seg button[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.seg.green button[aria-checked='true'] {
+  background: var(--green);
+}
+
+.seg.red button[aria-checked='true'] {
+  background: var(--red);
+}
+
+.seg.light button[aria-checked='true'] {
+  background: var(--text);
+  color: var(--bg);
+}
+
+/* a red mono block for errors from the api */
+.error-box {
+  padding: 10px 12px;
+  border-radius: 2px;
+  background: rgba(240, 100, 91, 0.1);
+  font: 400 12px/1.6 var(--mono);
+}
+
+.error-box strong {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* a full width button, for forms */
+.btn.wide {
+  width: 100%;
+}
+
+/* dialogs use the native <dialog> element, it handles focus and the escape key for us */
+dialog.modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg-dialog);
+  color: var(--text);
+}
+
+dialog.modal::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+}

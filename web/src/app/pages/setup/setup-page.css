@@ -1,0 +1,35 @@
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 420px;
+  max-width: 100%;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+h1 {
+  font: 400 38px/1.1 var(--serif);
+}
+
+.head p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* a plain line between two rules, not a box with an icon */
+.notice {
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  line-height: 1.5;
+}
+
+.notice strong {
+  margin-right: 8px;
+  font-weight: 600;
+}

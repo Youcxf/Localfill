@@ -1,0 +1,34 @@
+dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+h1 {
+  font: 400 25px/1.15 var(--serif);
+}
+
+.text {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.lines {
+  margin-top: 18px;
+  font-size: 13px;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  border-top: 1px solid var(--rule);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 22px;
+}

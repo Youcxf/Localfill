@@ -1,0 +1,63 @@
+<div class="page">
+  @if (notice()) {
+    <p class="notice"><strong class="amber">Rollover</strong> {{ notice() }}</p>
+  }
+
+  <div class="top">
+    <p class="muted">{{ summary() }}</p>
+    @if (groups().length) {
+      <button type="button" class="btn danger" (click)="askFlattenAll()">Flatten all</button>
+    }
+  </div>
+
+  @if (error()) {
+    <p class="error-box"><strong>error</strong> {{ error() }}</p>
+  }
+
+  @if (lastFlatten(); as flatten) {
+    <p class="last muted">
+      Flatten #{{ flatten.id }}:
+      <strong [class]="flatten.status === 'done' ? 'green' : 'amber'">{{ flatten.status }}</strong>
+      @if (flatten.message) {
+        <span> · {{ flatten.message }}</span>
+      }
+    </p>
+  }
+
+  @for (group of groups(); track group.contract) {
+    <section>
+      <div class="title">
+        <span class="contract mono">{{ group.contract }}</span>
+        <span class="muted">{{ group.summary }}</span>
+        @if (group.old) {
+          <strong class="amber old">old contract month</strong>
+        }
+        <span class="grow"></span>
+        <button type="button" class="btn small outline-danger" (click)="askFlattenContract(group)">
+          Flatten {{ group.contract }}
+        </button>
+      </div>
+
+      @for (row of group.rows; track $index) {
+        <div class="row">
+          <span class="muted">{{ row.connection }}</span>
+          <span class="mono account">{{ row.account }}</span>
+          <span class="mono qty">{{ row.qty }}</span>
+          <strong [class]="row.side === 'long' ? 'green' : 'red'">{{ row.side }}</strong>
+        </div>
+      }
+    </section>
+  }
+</div>
+
+@if (question(); as q) {
+  <app-flatten-dialog
+    [title]="q.title"
+    [text]="q.text"
+    [lines]="q.lines"
+    [confirmLabel]="q.confirmLabel"
+    [busy]="busy()"
+    (confirmed)="confirm()"
+    (cancelled)="question.set(null)"
+  />
+}

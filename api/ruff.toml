@@ -1,0 +1,5 @@
+line-length = 140
+
+[lint]
+# errors, unused code and import order. nothing fancy
+select = ["E", "F", "I"]

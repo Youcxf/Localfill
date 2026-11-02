@@ -1,0 +1,43 @@
+services:
+  localfill:
+    build: .
+    image: localfill
+    restart: unless-stopped
+    # both ports are only reachable from this computer. see the readme before changing that
+    ports:
+      - "127.0.0.1:8010:8010" # webhook, this is what your tunnel points to
+      - "127.0.0.1:8011:8011" # dashboard and api
+    volumes:
+      - localfill-data:/data
+      # while you work on the frontend: serve your own build without rebuilding the image
+      # - ./web/dist/localfill/browser:/app/static:ro
+    # settings go in a file called .env (see .env.example), it is fine if it does not exist
+    env_file:
+      - path: .env
+        required: false
+
+  # optional: a cloudflare tunnel so tradingview can reach your webhook.
+  # start it with: docker compose --profile tunnel up -d
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - localfill
+
+  # optional: a fake tradovate to try things without an account.
+  # start it with: docker compose --profile mock up -d
+  # and put this in .env: LOCALFILL_TRADOVATE_DEMO_URL=http://mock:9000/v1
+  mock:
+    image: localfill
+    profiles: ["mock"]
+    command: python -m app.devtools.fake_tradovate
+    # the image's healthcheck looks at the dashboard port, which this one does not have
+    healthcheck:
+      disable: true
+
+volumes:
+  localfill-data:

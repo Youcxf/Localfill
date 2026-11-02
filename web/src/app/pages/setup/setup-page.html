@@ -1,0 +1,54 @@
+<app-auth-frame>
+  <form (ngSubmit)="submit()">
+    <div class="head">
+      <h1>Welcome to localfill</h1>
+      <p class="muted">
+        Choose a password for this dashboard. It protects your Tradovate logins and the order buttons.
+      </p>
+    </div>
+
+    <p class="notice">
+      <strong class="amber">Do this first</strong>
+      Whoever opens this page first chooses the password, so do it right after starting localfill.
+    </p>
+
+    <div class="field">
+      <label for="new-password">Password</label>
+      <input
+        id="new-password"
+        name="password"
+        type="password"
+        class="input tall"
+        [class.invalid]="tried() && problem()"
+        placeholder="At least 8 characters"
+        autocomplete="new-password"
+        autofocus
+        [(ngModel)]="password"
+      />
+    </div>
+
+    <div class="field">
+      <label for="repeat-password">Repeat password</label>
+      <input
+        id="repeat-password"
+        name="repeat"
+        type="password"
+        class="input tall"
+        placeholder="Type it again"
+        autocomplete="new-password"
+        [(ngModel)]="repeat"
+      />
+    </div>
+
+    @if (tried() && problem()) {
+      <p class="error-box"><strong>error</strong> {{ problem() }}</p>
+    }
+    @if (serverError()) {
+      <p class="error-box"><strong>error</strong> {{ serverError() }}</p>
+    }
+
+    <button type="submit" class="btn primary tall wide" [disabled]="busy()">
+      {{ busy() ? 'Saving…' : 'Create password' }}
+    </button>
+  </form>
+</app-auth-frame>

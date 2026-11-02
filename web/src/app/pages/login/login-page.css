@@ -1,0 +1,44 @@
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 400px;
+  max-width: 100%;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+h1 {
+  font: 400 42px/1.1 var(--serif);
+}
+
+.head p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.forgot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+code {
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--bg-field);
+  color: var(--text);
+  font: 400 11px var(--mono);
+  white-space: nowrap;
+  overflow-x: auto;
+}

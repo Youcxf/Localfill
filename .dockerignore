@@ -1,0 +1,16 @@
+.git
+.github
+.env
+docs
+web/node_modules
+web/dist
+api/.venv
+api/tests
+api/data
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+
+# design files that are not part of the app
+*.zip
+.tmp-run
