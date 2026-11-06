@@ -202,3 +202,5 @@ The dashboard only uses the API, so you can build your own: [docs/frontend.md](d
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+Created and maintained by [Youcef Si-Ramdane](https://localfill.dev).
