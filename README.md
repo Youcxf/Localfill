@@ -1,11 +1,15 @@
-<h1>
+<div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark-theme.png">
-    <img src="docs/images/logo-light-theme.png" alt="localfill" width="280">
+    <img src="docs/images/logo-light-theme.png" alt="localfill - Tradovate Trade Copier and TradingView Webhook Server" width="280">
   </picture>
-</h1>
 
-A self-hosted server that turns TradingView alerts (or any webhook) into orders on your Tradovate accounts, and copies each one across all of them. Does the same job as PickMyTrade, TradersPost or Tradesyncer, but your logins stay on your machine. Works with prop firm accounts with or without Tradovate API access.
+  # Open-Source Tradovate Trade Copier & Webhook Server
+</div>
+
+A self-hosted trade copier and webhook automation server for **Tradovate**. Automatically converts **TradingView alerts** (or custom webhooks) into futures orders and replicates them across multiple accounts simultaneously. 
+
+A free, private alternative to **PickMyTrade, TradersPost, Tradesyncer, or Replikanto** credentials and encryption keys stay strictly on your local machine. Works seamlessly with prop firm accounts (Apex Trader Funding, Topstep, etc.) with or without a paid Tradovate API subscription.
 
 > **Current Version** : <ins>1.1.0</ins>
 
@@ -20,7 +24,7 @@ A self-hosted server that turns TradingView alerts (or any webhook) into orders 
 - Ignores identical alerts that arrive within 2 seconds
 - Saved Tradovate passwords are encrypted
 
-## Quick start
+## Quick start with Docker
 
 Needs [Docker](https://www.docker.com/products/docker-desktop/).
 
@@ -47,7 +51,7 @@ LOCALFILL_TRADOVATE_DEMO_URL=http://mock:9000/v1
 
 Then run `docker compose --profile mock up -d --build`. Any login works except the username `baduser`, which is refused. You get two fake accounts with fake fills.
 
-## Ports
+## Ports & Architecture
 
 ```
 TradingView --> tunnel --> :8010  webhook    --+
@@ -62,7 +66,7 @@ you ----------------------> :8011  dashboard --+
 
 Docker publishes both on `127.0.0.1` only. TradingView can't reach a home computer directly, so it needs the tunnel.
 
-## Sending alerts
+## Sending TradingView alerts
 
 The webhook URL is on the Settings page: `https://<tunnel address>/hook/<token>`. Test it locally (this places an order unless dry run is on):
 
@@ -164,24 +168,24 @@ npm run build                   # output in web/dist/localfill/browser
 
 ```
 api/app/
-  main.py         starts both servers
-  config.py       settings
-  context.py      things both servers share
-  db.py           sqlite and migrations
-  crypto.py       password encryption
-  models.py       request and answer shapes
-  routes/         http endpoints
-  services/       dispatcher, signals, connections, reports
-  tradovate/      login, api client, front month lookup
-  devtools/       fake Tradovate (also fakes fills, positions, P/L)
+  main.py          starts both servers
+  config.py        settings
+  context.py       things both servers share
+  db.py            sqlite and migrations
+  crypto.py        password encryption
+  models.py        request and answer shapes
+  routes/          http endpoints
+  services/        dispatcher, signals, connections, reports
+  tradovate/       login, api client, front month lookup
+  devtools/        fake Tradovate (also fakes fills, positions, P/L)
 api/tests/
-docs/             api.md, frontend.md, tunnel.md
+docs/              api.md, frontend.md, tunnel.md
 web/src/app/
-  api/            typed api service, live events, login guard
-  core/           formatting, shared state
-  layout/         sidebar, top bar
-  pages/          one folder per screen
-  shared/         status badge, dialogs
+  api/             typed api service, live events, login guard
+  core/            formatting, shared state
+  layout/          sidebar, top bar
+  pages/           one folder per screen
+  shared/          status badge, dialogs
 ```
 
 The dashboard only uses the API, so you can build your own: [docs/frontend.md](docs/frontend.md).
