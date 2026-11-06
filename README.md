@@ -5,7 +5,7 @@
   </picture>
 </h1>
 
-A self-hosted server that turns TradingView alerts (or any webhook) into orders on your Tradovate accounts, and copies each one across all of them. Does the same job as PickMyTrade, TradersPost or Tradesyncer, but your logins stay on your machine. Works with prop firm accounts that have with or without Tradovate API access.
+A self-hosted server that turns TradingView alerts (or any webhook) into orders on your Tradovate accounts, and copies each one across all of them. Does the same job as PickMyTrade, TradersPost or Tradesyncer, but your logins stay on your machine. Works with prop firm accounts with or without Tradovate API access.
 
 > **Current Version** : <ins>1.1.0</ins>
 
