@@ -5,9 +5,9 @@
   </picture>
 </h1>
 
-A self-hosted server that turns TradingView alerts (or any webhook) into orders on your Tradovate accounts, and copies each one across all of them. Does the same job as PickMyTrade, TradersPost or Tradesyncer, but your logins stay on your machine. Works with prop firm accounts that have no API access.
+A self-hosted server that turns TradingView alerts (or any webhook) into orders on your Tradovate accounts, and copies each one across all of them. Does the same job as PickMyTrade, TradersPost or Tradesyncer, but your logins stay on your machine. Works with prop firm accounts that have with or without Tradovate API access.
 
-> **Status:** login and account loading work on a real Tradovate account. Everything else has only been tested against the included fake Tradovate, so start on demo.
+> **Current Version** : <ins>1.1.0</ins>
 
 ## Features
 
@@ -186,7 +186,7 @@ web/src/app/
 
 The dashboard only uses the API, so you can build your own: [docs/frontend.md](docs/frontend.md).
 
-## Not done yet
+## Future features (to add)
 
 - Bracket orders (stop loss and take profit on entry)
 - Per-account size multiplier and risk limits such as a daily loss stop
