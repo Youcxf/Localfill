@@ -3,6 +3,20 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark-theme.png">
     <img src="docs/images/logo-light-theme.png" alt="localfill - Tradovate Trade Copier and TradingView Webhook Server" width="280">
   </picture>
+  <br/>
+  
+  
+  <!-- License & Stars -->
+[![MIT License](https://img.shields.io/github/license/Youcxf/Localfill?style=flat-square&color=blue)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Youcxf/Localfill?style=flat-square&logo=github)](https://github.com/Youcxf/Localfill/stargazers)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Docker Image Size](https://img.shields.io/docker/image-size/youcxf/localfill/latest?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/youcxf/localfill)
+[![Self-Hosted](https://img.shields.io/badge/Self--Hosted-Yes-success?style=flat-square&logo=home-assistant&logoColor=white)](#)
+
+
+<a href="https://alternativeto.net/software/localfill/about/?utm_source=badge&utm_medium=referral">
+  <img src="https://alternativeto.net/static/badges/badge-compact-color.svg" alt="Localfill | AlternativeTo" height="55" />
+</a>
 
   # Open-Source Tradovate Trade Copier & Webhook Server
 </div>
