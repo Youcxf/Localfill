@@ -39,3 +39,10 @@ class Settings(BaseSettings):
     token_renew_threshold: float = 0.75
     # how long we remember which contract is the front month
     contract_cache_seconds: float = 3600.0
+    # how often to try logging in again on connections that are offline (0 = never)
+    reconnect_seconds: float = 60.0
+    # how often to reload the account list of online connections, to notice closed accounts (0 = never)
+    account_refresh_seconds: float = 600.0
+    # the most contracts one alert may ask for per account (qty, or the size of position).
+    # stops a typo or a leaked webhook url from sending a huge order. 0 = no limit
+    max_contracts: int = 10

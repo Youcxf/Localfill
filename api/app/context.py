@@ -5,6 +5,7 @@ import secrets
 
 from app.crypto import Crypto
 from app.db import Database
+from app.lock import DataDirLock
 from app.services.connections import ConnectionManager
 from app.services.dispatcher import Dispatcher
 from app.services.events import EventBus
@@ -33,6 +34,8 @@ class AppContext:
 
     async def start(self):
         os.makedirs(self.settings.data_dir, exist_ok=True)
+        self.lock = DataDirLock(self.settings.data_dir)
+        self.lock.acquire()
         self.db = Database(os.path.join(self.settings.data_dir, "localfill.db"))
         await self.db.open()
         self.crypto = Crypto(os.path.join(self.settings.data_dir, "secret.key"))
@@ -49,7 +52,9 @@ class AppContext:
             await self.db.set_setting("webhook_token", token)
         self.webhook_token = token
 
+        await self.processor.close_unfinished()
         await self.manager.load_saved()
+        self.manager.start_background()
 
     # runs a coroutine in the background (keeps a reference so it is not garbage collected)
     def spawn(self, coroutine):
@@ -64,3 +69,4 @@ class AppContext:
             await asyncio.wait(self.tasks, timeout=8)
         await self.manager.stop_all()
         await self.db.close()
+        self.lock.release()

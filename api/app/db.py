@@ -32,6 +32,11 @@ MIGRATIONS = [
         result text
     );
     """,
+    # the accounts a connection had when its targets were last chosen. with "every account"
+    # picked, an account that shows up later is not traded until you select it
+    """
+    alter table connections add column known_accounts text;
+    """,
 ]
 
 

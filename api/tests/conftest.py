@@ -32,6 +32,9 @@ def make_settings(tmp_path, server):
         retry_backoff_base=0.01,
         http_timeout_seconds=5,
         dedupe_seconds=0,
+        # the tests that need it turn it on themselves
+        reconnect_seconds=0,
+        account_refresh_seconds=0,
         static_dir=str(tmp_path / "no-frontend"),
     )
 

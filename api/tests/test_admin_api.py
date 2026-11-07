@@ -99,7 +99,9 @@ async def test_connections_come_back_after_a_restart(ctx, connected, tmp_path, b
     _, server = broker_server
     await connected.patch("/api/connections/A", json={"target_accounts": ["DEMO1002"]})
 
-    # a second app on the same data folder, like restarting the container
+    # a second app on the same data folder, like restarting the container.
+    # the first one lets go of the data folder lock, as if it had stopped
+    ctx.lock.release()
     second = AppContext(make_settings(tmp_path, server))
     await second.start()
     try:

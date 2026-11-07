@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -30,6 +31,12 @@ class TradovateRequestError(TradovateError):
         self.payload = payload
 
 
+# we sent something that changes the account (an order) and got no clear answer.
+# it may or may not have gone through, so it must not be sent again blindly
+class TradovateUncertainError(TradovateRequestError):
+    pass
+
+
 # tradovate does not always answer with json (some errors are plain text)
 def safe_json(body):
     try:
@@ -55,8 +62,13 @@ class TradovateConnection:
         # account id -> is the account active
         self.account_active = {}
         self.last_error = None
+        # true when tradovate refused the login itself (wrong password, captcha). trying
+        # again on our own will not fix that and can get the login locked
+        self.needs_user = False
         self.renewal_task = None
         self.auth_lock = asyncio.Lock()
+        # when we logged in again because of a 401, to stop login loops
+        self.relogins = []
         # set after login when tradovate says this user lives on another host
         self.api_url = None
 
@@ -83,6 +95,11 @@ class TradovateConnection:
     def use_api_hosts(self, hosts):
         host = (hosts or {}).get("demo" if self.config.demo else "live")
         self.api_url = f"https://{host}/v1/" if host else None
+
+    # logged in and accounts loaded (start finished)
+    @property
+    def online(self):
+        return self.renewal_task is not None and not self.renewal_task.done()
 
     @property
     def authenticated(self):
@@ -118,16 +135,23 @@ class TradovateConnection:
 
     # ---------- login ----------
 
-    def auth_failed(self, message):
+    def auth_failed(self, message, needs_user=False):
         self.last_error = message
+        self.needs_user = needs_user
         return TradovateAuthError(f"[{self.label}] {message}")
 
     # stale_token: the token a failed request was using. if the token has changed
     # since then, someone else already logged in again and we can skip
-    async def authenticate(self, stale_token=None):
+    # after_401: we log in again because a request was refused. capped, see too_many_relogins
+    async def authenticate(self, stale_token=None, after_401=False):
         async with self.auth_lock:
             if stale_token is not None and self.access_token != stale_token:
                 return
+            # tokens keep getting refused (for example the same user logs in somewhere else and
+            # tradovate ends our session each time): logging in again and again would only get
+            # the login throttled or locked
+            if after_401 and self.too_many_relogins():
+                raise TradovateRequestError("tradovate keeps refusing our token, already logged in again 3 times this minute")
 
             data = {}
             p_ticket = None
@@ -139,7 +163,7 @@ class TradovateConnection:
                     raise self.auth_failed(f"login failed: {exc}") from exc
 
                 if data.get("p-captcha"):
-                    raise self.auth_failed("tradovate wants a captcha, log in on their website once and try again")
+                    raise self.auth_failed("tradovate wants a captcha, log in on their website once and try again", needs_user=True)
 
                 # too many logins: tradovate tells us to wait and send the ticket back
                 ticket = data.get("p-ticket")
@@ -155,7 +179,7 @@ class TradovateConnection:
             token = data.get("accessToken")
             if not token:
                 message = data.get("errorText") or f"no accessToken in the answer: {data}"
-                raise self.auth_failed(f"login rejected: {message}")
+                raise self.auth_failed(f"login rejected: {message}", needs_user=True)
 
             self.access_token = token
             self.issued_at = datetime.now(timezone.utc)
@@ -163,6 +187,7 @@ class TradovateConnection:
             self.user_id = data.get("userId")
             self.use_api_hosts(data.get("apiHosts"))
             self.last_error = None
+            self.needs_user = False
             logger.info("[%s] logged in (user %s, expires %s)", self.label, self.user_id, self.expires_at)
 
     @staticmethod
@@ -213,30 +238,45 @@ class TradovateConnection:
 
     async def refresh_accounts(self):
         accounts = await self.request("GET", "/account/list")
-        self.account_names.clear()
-        self.account_ids.clear()
-        self.account_active.clear()
+        # build the new lists first and swap them in at once, so a signal running at the
+        # same moment never sees a half filled list
+        names, ids, active = {}, {}, {}
         for account in accounts or []:
             account_id = account.get("id")
             if account_id is None:
                 continue
             name = account.get("name", str(account_id))
-            self.account_names[account_id] = name
-            self.account_ids[name] = account_id
-            self.account_ids[str(account_id)] = account_id
-            self.account_active[account_id] = account.get("active", True)
-        logger.info("[%s] found %d accounts", self.label, len(self.account_names))
+            names[account_id] = name
+            ids[name] = account_id
+            ids[str(account_id)] = account_id
+            # closed accounts (blown evaluations...) can not trade anymore
+            active[account_id] = account.get("active", True) and not account.get("closed", False)
+        self.account_names, self.account_ids, self.account_active = names, ids, active
+
+        known = self.config.known_accounts
+        if not self.config.target_accounts and known is not None:
+            for name in names.values():
+                if name not in known:
+                    logger.warning("[%s] new account %s found, it gets no orders until you select it", self.label, name)
+        logger.info("[%s] found %d accounts", self.label, len(names))
 
     # the account ids that should receive orders
     def target_account_ids(self):
         if not self.config.target_accounts:
-            # nothing picked: use every active account
-            return [i for i, active in self.account_active.items() if active]
+            # nothing picked: every active account that existed when that was chosen
+            known = self.config.known_accounts
+            return [
+                i for i, ok in self.account_active.items()
+                if ok and (known is None or self.account_names[i] in known)
+            ]
         found = []
         for key in self.config.target_accounts:
             account_id = self.account_ids.get(key)
             if account_id is None:
                 logger.warning("[%s] target account '%s' not found", self.label, key)
+                continue
+            if not self.account_active.get(account_id, True):
+                logger.warning("[%s] target account '%s' is closed or inactive, skipped", self.label, key)
                 continue
             found.append(account_id)
         return found
@@ -261,7 +301,10 @@ class TradovateConnection:
             raise TradovateRequestError(f"{path}: network error: {exc}") from exc
 
     # a normal api call. logs in again on a 401 and retries with a growing delay
-    async def request(self, method, path, json_body=None):
+    # retry=False is for orders: if tradovate may already have received it, we stop instead
+    # of sending it again (that would place a second order). a request that never left
+    # (could not connect) or that got a 401 is still safe to send again
+    async def request(self, method, path, json_body=None, retry=True):
         if self.session is None:
             raise TradovateRequestError("connection is not started")
         # the base url ends with /v1/ so the path must not start with a slash
@@ -288,11 +331,15 @@ class TradovateConnection:
                             raise last_error
                         logger.warning("[%s] 401 on %s, logging in again", self.label, path)
                         logged_in_again = True
-                        await self.authenticate(stale_token=token_used)
+                        await self.authenticate(stale_token=token_used, after_401=True)
                         continue
 
                     if resp.status >= 500:
                         last_error = TradovateRequestError(f"{path} -> HTTP {resp.status}: {data}", status=resp.status, payload=data)
+                        if not retry:
+                            raise TradovateUncertainError(
+                                f"{path} -> HTTP {resp.status}, it may or may not have gone through", status=resp.status, payload=data
+                            )
                         await self.sleep_backoff(attempt)
                         continue
 
@@ -300,14 +347,42 @@ class TradovateConnection:
                     if resp.status >= 400:
                         raise TradovateRequestError(f"{path} -> HTTP {resp.status}: {data}", status=resp.status, payload=data)
 
+                    # too many requests: tradovate did not run this one, it tells us to wait and
+                    # send it again with the ticket (the same thing it does for logins)
+                    if isinstance(data, dict) and data.get("p-ticket"):
+                        if data.get("p-captcha"):
+                            raise TradovateRequestError(f"{path}: tradovate wants a captcha, log in on their website once")
+                        wait = data.get("p-time", 1)
+                        if wait > 60:
+                            raise TradovateRequestError(f"{path}: requests are throttled for {wait} seconds")
+                        logger.warning("[%s] %s throttled, waiting %s seconds", self.label, path, wait)
+                        await asyncio.sleep(wait)
+                        if isinstance(json_body, dict):
+                            json_body = {**json_body, "p-ticket": data["p-ticket"]}
+                        last_error = TradovateRequestError(f"{path}: throttled")
+                        continue
+
                     return data
 
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 last_error = exc
+                # ClientConnectorError means we never reached tradovate, anything else might have
+                if not retry and not isinstance(exc, aiohttp.ClientConnectorError):
+                    raise TradovateUncertainError(f"{path}: no answer ({exc!r}), it may or may not have gone through") from exc
                 logger.warning("[%s] network error on %s (try %d/%d): %s", self.label, path, attempt + 1, self.settings.max_retries, exc)
                 await self.sleep_backoff(attempt)
 
         raise TradovateRequestError(f"{path} failed after {self.settings.max_retries} tries: {last_error}")
+
+    # true if we already logged in again 3 times in the last minute because of 401s.
+    # otherwise remembers this one
+    def too_many_relogins(self):
+        now = time.monotonic()
+        self.relogins = [t for t in self.relogins if now - t < 60]
+        if len(self.relogins) >= 3:
+            return True
+        self.relogins.append(now)
+        return False
 
     async def sleep_backoff(self, attempt):
         base = self.settings.retry_backoff_base

@@ -25,10 +25,14 @@ class SignalProcessor:
         self.lock = asyncio.Lock()
         # signal text -> when we saw it, used to drop duplicates
         self.seen = {}
+        # (symbol, connection, accounts) -> sent_at of the newest alert we accepted
+        self.newest = {}
 
     def is_duplicate(self, signal):
         seconds = self.settings.dedupe_seconds
-        if seconds <= 0:
+        # a position signal sent twice does nothing the second time, so it is never dropped.
+        # that way two identical alerts on purpose (scaling in) are not lost in position mode
+        if seconds <= 0 or signal.position is not None:
             return False
         now = time.monotonic()
         # forget the old ones
@@ -39,10 +43,25 @@ class SignalProcessor:
         self.seen[key] = now
         return False
 
+    # true if a newer alert for the same thing was already accepted (alerts can arrive out of order)
+    def is_late(self, signal):
+        if signal.sent_at is None:
+            return False
+        key = (signal.contract or signal.symbol, signal.connection, tuple(signal.accounts or ()))
+        newest = self.newest.get(key)
+        if newest is not None and signal.sent_at < newest:
+            return True
+        self.newest[key] = signal.sent_at
+        return False
+
     # saves the signal. returns the record and whether it should be executed
     async def receive(self, signal, source):
         if source == "webhook" and self.is_duplicate(signal):
             record = await self.save(signal, source, "duplicate", "same signal came in a moment ago, ignored")
+            return record, False
+        if self.is_late(signal):
+            message = "a newer alert for this symbol already arrived, this late one was ignored"
+            record = await self.save(signal, source, "duplicate", message)
             return record, False
         record = await self.save(signal, source, "pending")
         logger.info("signal %s from %s: %s %s x%s", record.id, source, signal.action, signal.symbol, signal.qty)
@@ -71,6 +90,15 @@ class SignalProcessor:
             errors = [r.error for r in result.results if r.error]
             message = errors[0] if errors else None
         return await self.finish(signal_id, status, message or None, result)
+
+    # signals that were still running when localfill stopped (crash, power cut). we can not
+    # know if their orders went out, so they are marked as errors instead of staying pending
+    async def close_unfinished(self):
+        rows = await self.db.fetch_all("select id from signals where status = 'pending'")
+        for row in rows:
+            await self.finish(row["id"], "error", "localfill stopped while this signal was running, check the accounts")
+        if rows:
+            logger.warning("%d signal(s) were still running at the last shutdown, marked as errors", len(rows))
 
     # ---------- database ----------
 

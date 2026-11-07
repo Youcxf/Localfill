@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -29,6 +30,16 @@ class Signal(BaseModel):
     # only trade on this connection, empty means all of them
     connection: str | None = None
     is_automated: bool = True
+    # the position every account should end up with (positive long, negative short, 0 flat).
+    # when set, qty is ignored: each account sends whatever gets it there, so accounts that
+    # missed a signal or only partly filled catch up on the next one
+    position: int | None = None
+    # when tradingview sent the alert ({{timenow}}). an alert older than the last one we ran
+    # for the same symbol arrived late and is skipped, so a late "flat" can not undo a "long"
+    sent_at: datetime | None = None
+    # only these account names (or ids), instead of every target account of the connection.
+    # lets two strategies trade the same symbol on different accounts
+    accounts: list[str] | None = None
 
     # tradingview sends "buy" but some people write "Buy", so lowercase it
     @field_validator("action", "order_type", mode="before")
@@ -52,11 +63,15 @@ class Signal(BaseModel):
     @model_validator(mode="after")
     def check_fields(self):
         if self.action == "flatten":
+            if self.position is not None:
+                raise ValueError("flatten does not take a position, use position 0 instead")
             return self
         if not self.symbol:
             raise ValueError("symbol is required for buy and sell")
         if self.order_type in ("limit", "stop") and self.price is None:
             raise ValueError("price is required for limit and stop orders")
+        if self.position is not None and self.order_type != "market":
+            raise ValueError("position only works with market orders")
         return self
 
 
@@ -131,6 +146,9 @@ class ConnectionConfig(BaseModel):
     device_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     # account names or ids to trade on, empty means every active account
     target_accounts: list[str] = Field(default_factory=list)
+    # filled in by localfill: the account names that existed when the targets were chosen.
+    # with empty target_accounts only these are traded, so a new account is never traded by surprise
+    known_accounts: list[str] | None = None
 
     @model_validator(mode="after")
     def check_api_key(self):

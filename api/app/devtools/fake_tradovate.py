@@ -54,6 +54,19 @@ class FakeBroker:
         self.throttle_next_login = False
         self.refuse_orders = False
         self.reject_after_accept = False
+        # answer placeorder with this http error, after the order was really placed
+        self.order_error_status = None
+        # answer the next placeorder with a time penalty instead of placing it
+        self.penalize_next_order = False
+        # after each fill, this many position reads still return the positions from before it
+        # (tradovate's position list can lag behind fills)
+        self.stale_reads_after_fill = 0
+        self.stale_position_reads = 0
+        self.position_snapshot = {}
+        # account names that tradovate reports as closed, and accounts added later
+        self.closed_accounts = set()
+        self.extra_accounts = []
+        self.cancelled_orders = []
         # seconds every placeorder takes, to test what happens when orders are slow
         self.order_delay = 0.0
 
@@ -96,7 +109,8 @@ class FakeBroker:
     # ---------- accounts and contracts ----------
 
     async def account_list(self, request):
-        return web.json_response(ACCOUNTS)
+        rows = [dict(a, closed=a["name"] in self.closed_accounts) for a in ACCOUNTS + self.extra_accounts]
+        return web.json_response(rows)
 
     async def contract_suggest(self, request):
         text = request.query.get("t", "").upper()
@@ -118,6 +132,9 @@ class FakeBroker:
     async def place_order(self, request):
         body = await request.json()
         self.order_requests.append(body)
+        if self.penalize_next_order and "p-ticket" not in body:
+            self.penalize_next_order = False
+            return web.json_response({"p-ticket": "penalty-ticket", "p-time": 0})
         await asyncio.sleep(self.order_delay)
         if self.refuse_orders:
             return web.json_response({"failureReason": "TradingLocked", "failureText": "trading is locked"})
@@ -132,9 +149,14 @@ class FakeBroker:
             status = "Rejected"
         else:
             status = "Filled" if is_market else "Working"
-        self.orders[order_id] = {"id": order_id, "accountId": body["accountId"], "ordStatus": status}
+        self.orders[order_id] = {
+            "id": order_id, "accountId": body["accountId"], "contractId": contract["id"],
+            "action": body["action"], "ordStatus": status,
+        }
         if is_market and status == "Filled":
             self.add_fill(body["accountId"], contract, body["action"], body["orderQty"], order_id)
+        if self.order_error_status:
+            return web.json_response({"errorText": "gateway timeout"}, status=self.order_error_status)
         return web.json_response({"orderId": order_id})
 
     async def order_item(self, request):
@@ -144,6 +166,8 @@ class FakeBroker:
         return web.json_response(order)
 
     def add_fill(self, account_id, contract, action, qty, order_id):
+        self.position_snapshot = {key: dict(value) for key, value in self.positions.items()}
+        self.stale_position_reads = self.stale_reads_after_fill
         price = self.price_of(contract)
         fill_id = next(self.ids)
         self.fills.append({
@@ -194,13 +218,36 @@ class FakeBroker:
     # note: this one ignores the accountId in the url on purpose (so the tests can check
     # that we never touch another account's positions), the fill lists below honor it
     async def position_list(self, request):
+        positions = self.positions
+        if self.stale_position_reads > 0:
+            self.stale_position_reads -= 1
+            positions = self.position_snapshot
         rows = []
-        for (account_id, contract_id), position in self.positions.items():
+        for (account_id, contract_id), position in positions.items():
             rows.append({
                 "id": account_id * 100 + contract_id, "accountId": account_id, "contractId": contract_id,
                 "netPos": position["netPos"], "netPrice": position["netPrice"],
             })
         return web.json_response(rows)
+
+    # orders of one account (masterid = account id)
+    async def order_deps(self, request):
+        account_id = int(request.query["masterid"])
+        return web.json_response([o for o in self.orders.values() if o["accountId"] == account_id])
+
+    async def cancel_order(self, request):
+        body = await request.json()
+        order = self.orders.get(body["orderId"])
+        if order is None or order["ordStatus"] != "Working":
+            return web.json_response({"failureReason": "UnknownReason", "failureText": "not working"})
+        order["ordStatus"] = "Canceled"
+        self.cancelled_orders.append(order["id"])
+        return web.json_response({"orderId": order["id"]})
+
+    # fills of one order (masterid = order id)
+    async def fill_deps(self, request):
+        order_id = int(request.query["masterid"])
+        return web.json_response([f for f in self.fills if f["orderId"] == order_id])
 
     async def fill_list(self, request):
         return web.json_response(self.for_account(self.fills, request))
@@ -250,6 +297,9 @@ def make_app(broker=None):
     app.router.add_post("/v1/order/liquidateposition", broker.liquidate)
     app.router.add_get("/v1/position/list", broker.position_list)
     app.router.add_get("/v1/fill/list", broker.fill_list)
+    app.router.add_get("/v1/fill/deps", broker.fill_deps)
+    app.router.add_get("/v1/order/deps", broker.order_deps)
+    app.router.add_post("/v1/order/cancelorder", broker.cancel_order)
     app.router.add_get("/v1/fillPair/list", broker.pair_list)
     app.router.add_get("/v1/cashBalance/list", broker.cash_list)
     return app

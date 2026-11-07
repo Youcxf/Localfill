@@ -11,17 +11,23 @@ A self-hosted trade copier and webhook automation server for **Tradovate**. Auto
 
 A free, private alternative to **PickMyTrade, TradersPost, Tradesyncer, or Replikanto** credentials and encryption keys stay strictly on your local machine. Works seamlessly with prop firm accounts (Apex Trader Funding, Topstep, etc.) with or without a paid Tradovate API subscription.
 
-> **Current Version** : <ins>1.1.0</ins>
+> **Current Version** : <ins>1.2.0</ins>
 
 ## Features
 
-- **Copy trading:** one alert goes to every target account, on several logins at once, all sent at the same time. Choose the target accounts per login. Each account gets the same `qty`. It copies alerts, not trades you place by hand on Tradovate
+- **Copy trading:** one alert goes to every target account, on several logins at once, all sent at the same time. Choose the target accounts per login. It copies alerts, not trades you place by hand on Tradovate
+- **Position sync:** send the position you want instead of a quantity, and each account sends only what it needs to get there. Accounts that missed an alert, got a partial fill or went offline catch up on the next one
+- Orders are never resent after an unclear answer, so a timeout can't place a double order
+- Safety limits: max contracts per alert, late alerts ignored, a second copy of localfill refuses to start
+- New Tradovate accounts get no orders until you select them, closed accounts are skipped
+- Flatten cancels working orders too
+- Offline logins are retried every minute
 - Buy, sell (market, limit, stop) and flatten
 - Turns `MNQ` or `MNQ1!` into the current front month contract
 - Tracks each order's real result (filled, rejected...) and fill price
 - Signal history, with live updates in the dashboard
 - Dry run: log alerts without sending orders
-- Ignores identical alerts that arrive within 2 seconds
+- Ignores identical `qty` alerts that arrive within 2 seconds
 - Saved Tradovate passwords are encrypted
 
 ## Quick start with Docker
@@ -86,15 +92,45 @@ In TradingView, tick "Webhook URL" under Notifications, paste the URL and use th
 
 To close positions: `{"action": "flatten", "symbol": "{{ticker}}"}`
 
+### Keeping accounts in sync
+
+With `qty`, every account gets the same order, so an account that misses one alert stays off until you fix it. Use `position` instead and localfill reads each account's real position for that contract and sends only the difference:
+
+```json
+{"action": "{{strategy.order.action}}", "symbol": "{{ticker}}", "position": {{strategy.position_size}}, "sent_at": "{{timenow}}"}
+```
+
+`position` is per account: `2` long 2, `-1` short 1, `0` flat. A flip (long 2 to short 1) is one sell of 3. An account already at the target sends nothing. It only works with market orders and ignores `qty`. Check on a test alert that `{{strategy.position_size}}` comes through negative when the strategy is short.
+
+After each order, localfill waits until Tradovate's position list shows the new position before running the next alert, so a slow update can't cause a second order. `sent_at` is optional: an alert older than the last one for the same symbol arrived late and is ignored, so a late "flat" can't undo a newer "long". It only has one-second precision, so two alerts in the same second aren't reordered.
+
+Things position mode can't decide for you:
+
+- **One strategy per symbol per account.** Two strategies on the same symbol and accounts would keep undoing each other, and trades you place by hand get undone at the next alert. Give each strategy its own accounts with `accounts`.
+- **Rollover.** If an account still holds last month's contract (MNQZ6 when the front month is MNQH7), position mode refuses to trade it and says so. Roll or flatten it first.
+- If Tradovate doesn't answer an order (timeout or 5xx), it is not sent again because it may already be placed. The result says so. With `position`, the next alert corrects that account either way.
+- Missed alerts are never replayed. Accounts catch up on the next alert, not before.
+- Working limit or stop orders aren't counted, only filled positions.
+- A login Tradovate refuses (wrong password, captcha) is not retried, so use **Reconnect** once it is fixed. Logins are also never retried more than 3 times a minute after refused tokens.
+
+### Accounts
+
+- With **every account** picked, only the accounts that existed when you picked it get orders. A new account added on Tradovate later (a new evaluation, say) gets nothing until you select it, or pick every account again.
+- Closed accounts (blown or archived) are skipped, even when picked by name. The account list reloads every 10 minutes.
+- Two copies of localfill on the same data folder would place every order twice, so the second one refuses to start. Two copies with *different* data folders and the same Tradovate logins can't be detected, so don't run Docker and a dev server with the same logins at once.
+
 | field | default | meaning |
 |-------|---------|---------|
 | `action` | required | `buy`, `sell` or `flatten`, any case |
 | `symbol` | required for buy and sell | `MNQ`, `MNQ1!` and `CME_MINI:MNQ1!` all mean the MNQ front month. On `flatten`, leave it out to close every position on every target account |
 | `qty` | `1` | contracts per account |
+| `position` | | target position per account, replaces `qty` (see [keeping accounts in sync](#keeping-accounts-in-sync)) |
 | `order_type` | `market` | `market`, `limit` or `stop` |
 | `price` | | required for `limit` and `stop` |
 | `contract` | | exact contract like `MNQZ6`, skips the front month lookup |
 | `connection` | | only trade on the login with this label |
+| `accounts` | | only these account names or ids, out of the target accounts. Example `["APEX-1", "APEX-2"]` |
+| `sent_at` | | when the alert was sent (`"{{timenow}}"`), used to ignore alerts that arrive late |
 | `is_automated` | `true` | passed to Tradovate |
 
 Other fields are ignored.
@@ -112,10 +148,13 @@ Optional environment variables, set in `.env` (see `.env.example`). In Docker, c
 | `LOCALFILL_TRADOVATE_DEMO_URL` | Tradovate's demo API | where demo connections log in |
 | `LOCALFILL_TRADOVATE_LIVE_URL` | Tradovate's live API | where live connections log in |
 | `LOCALFILL_HTTP_TIMEOUT_SECONDS` | `10` | timeout per Tradovate request |
-| `LOCALFILL_MAX_RETRIES` | `5` | tries per request (network errors and 5xx) |
+| `LOCALFILL_MAX_RETRIES` | `5` | tries per request (network errors and 5xx). Orders are never retried after they may have reached Tradovate |
 | `LOCALFILL_RETRY_BACKOFF_BASE` | `0.5` | first retry wait in seconds, doubles each time |
 | `LOCALFILL_TOKEN_RENEW_THRESHOLD` | `0.75` | renew the token after this fraction of its lifetime |
 | `LOCALFILL_CONTRACT_CACHE_SECONDS` | `3600` | how long a front month lookup is cached |
+| `LOCALFILL_RECONNECT_SECONDS` | `60` | how often offline logins are retried, `0` turns it off |
+| `LOCALFILL_ACCOUNT_REFRESH_SECONDS` | `600` | how often the account list reloads (to notice closed accounts), `0` turns it off |
+| `LOCALFILL_MAX_CONTRACTS` | `10` | most contracts one alert may ask for per account (`qty` or the size of `position`). Bigger alerts send nothing. `0` turns it off |
 | `LOCALFILL_DATA_DIR` | `data` (`/data` in Docker) | database and key location |
 | `LOCALFILL_STATIC_DIR` | `static` (`/app/static` in Docker) | built dashboard files |
 | `LOCALFILL_INGRESS_HOST` / `_PORT` | `127.0.0.1` / `8010` | webhook server address |
@@ -195,6 +234,7 @@ The dashboard only uses the API, so you can build your own: [docs/frontend.md](d
 - Bracket orders (stop loss and take profit on entry)
 - Per-account size multiplier and risk limits such as a daily loss stop
 - Copying trades placed by hand on a lead account
+- Testing position sync, rollover detection, flatten's order cancelling, throttling and the reconnect loop on a real account
 - Websocket streaming from Tradovate (everything is polled)
 - Testing orders, flatten and P/L on a real account. The fill pairs in `/api/pnl` assume Tradovate only returns the requested account's pairs. `realized_pnl` comes straight from Tradovate
 - Dashboard sessions are in memory, so a restart logs you out

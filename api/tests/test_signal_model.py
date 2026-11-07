@@ -46,6 +46,17 @@ def test_extra_fields_from_tradingview_are_ignored():
     assert signal.symbol == "MNQ"
 
 
+def test_position_needs_a_market_order():
+    assert Signal(action="buy", symbol="MNQ", position=-2).position == -2
+    with pytest.raises(ValidationError):
+        Signal(action="buy", symbol="MNQ", position=1, order_type="limit", price=100)
+
+
+def test_flatten_does_not_take_a_position():
+    with pytest.raises(ValidationError):
+        Signal(action="flatten", position=0)
+
+
 def test_api_key_mode_needs_cid_and_secret():
     with pytest.raises(ValidationError):
         ConnectionConfig(label="A", username="u", password="p", auth_mode="api_key")

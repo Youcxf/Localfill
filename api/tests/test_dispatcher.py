@@ -117,3 +117,68 @@ async def test_connection_without_accounts_is_skipped_with_a_warning(ctx, connec
 
     assert result.total == 0
     assert any("no accounts loaded" in w for w in result.warnings)
+
+
+# ---------- position mode ----------
+
+async def test_position_from_flat_buys_the_target(ctx, connected):
+    result = await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", position=2))
+
+    assert result.succeeded == 2
+    assert positions_of(ctx.broker) == {(1001, 1): 2, (1002, 1): 2}
+
+
+async def test_position_flip_is_one_order(ctx, connected):
+    await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", qty=2))
+
+    await ctx.dispatcher.run(Signal(action="sell", symbol="MNQ", position=-1))
+
+    assert positions_of(ctx.broker) == {(1001, 1): -1, (1002, 1): -1}
+    flip = ctx.broker.order_requests[2]
+    assert flip["action"] == "Sell"
+    assert flip["orderQty"] == 3
+
+
+async def test_position_catches_up_an_account_that_missed_a_signal(ctx, connected):
+    # only one account got the entry
+    await connected.patch("/api/connections/A", json={"target_accounts": ["DEMO1001"]})
+    await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", qty=1))
+    await connected.patch("/api/connections/A", json={"target_accounts": []})
+
+    result = await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", position=1))
+
+    assert positions_of(ctx.broker) == {(1001, 1): 1, (1002, 1): 1}
+    by_name = {r.account_name: r for r in result.results}
+    assert by_name["DEMO1001"].status == "already at 1"
+    assert by_name["DEMO1002"].status == "Filled"
+
+
+async def test_position_zero_closes(ctx, connected):
+    await ctx.dispatcher.run(Signal(action="sell", symbol="MNQ", qty=2))
+
+    await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", position=0))
+
+    assert positions_of(ctx.broker) == {}
+
+
+async def test_position_only_looks_at_that_contract(ctx, connected):
+    await ctx.dispatcher.run(Signal(action="sell", symbol="ES", qty=1))
+
+    await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", position=1))
+
+    assert positions_of(ctx.broker) == {(1001, 1): 1, (1002, 1): 1, (1001, 3): -1, (1002, 3): -1}
+
+
+# ---------- orders are never sent twice ----------
+
+async def test_an_order_without_a_clear_answer_is_not_sent_again(ctx, connected):
+    # tradovate placed the order but answered 504
+    ctx.broker.order_error_status = 504
+
+    result = await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ"))
+
+    # one request per account, no retries
+    assert len(ctx.broker.order_requests) == 2
+    assert result.failed == 2
+    assert "may or may not have gone through" in result.results[0].error
+    assert positions_of(ctx.broker) == {(1001, 1): 1, (1002, 1): 1}

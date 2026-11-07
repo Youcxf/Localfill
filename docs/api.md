@@ -39,14 +39,25 @@ The body is a signal, as JSON. TradingView sends it as `text/plain` when the mes
 |-------|------|---------|-------|
 | `action` | `"buy"`, `"sell"` or `"flatten"` | required | case does not matter |
 | `symbol` | string | | required for buy and sell. `MNQ1!` and `CME_MINI:MNQ1!` are turned into `MNQ`, then into the front month contract |
-| `qty` | integer, 1 or more | `1` | contracts per account |
+| `qty` | integer, 1 or more | `1` | contracts per account. Ignored when `position` is set |
+| `position` | integer | | target position per account (`2` long, `-1` short, `0` flat). Each account reads its real position for the contract and sends only the difference, nothing if it is already there. Market orders only, not allowed with `flatten` |
 | `order_type` | `"market"`, `"limit"` or `"stop"` | `"market"` | |
 | `price` | number | | required for `limit` and `stop`. Sent to Tradovate as the limit price or the stop price |
 | `contract` | string | | exact contract, like `MNQZ6`. Skips the front month lookup |
 | `connection` | string | | only this connection (by label) |
+| `accounts` | string list | | only these account names or ids, out of the target accounts |
+| `sent_at` | ISO date-time | | when the alert was sent. An alert older than the last one accepted for the same symbol, connection and accounts is saved as `duplicate` and not run |
 | `is_automated` | boolean | `true` | |
 
 For `flatten`, `symbol` (or `contract`) is optional. Without it every open position on every target account is closed.
+
+Before anything is sent, an alert asking for more than `LOCALFILL_MAX_CONTRACTS` per account (`qty`, or the size of `position`) fails with a warning and sends nothing.
+
+In position mode each account waits after its order until Tradovate's position list shows the target (up to 3 seconds; if it doesn't, the status ends with "position not confirmed yet"). An account holding another month of the same product fails with "still holds ..." and sends nothing.
+
+`flatten` first cancels the account's working orders (only for that contract if one is given), then closes the positions.
+
+Orders (`placeorder`, `liquidateposition`) are never retried after they may have reached Tradovate. If the answer is a timeout or a 5xx, that account's result fails with an error saying the order may or may not have gone through.
 
 ```bash
 curl -X POST http://localhost:8010/hook/YOUR_TOKEN \

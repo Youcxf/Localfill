@@ -28,6 +28,12 @@ export interface Signal {
   contract?: string | null;
   connection?: string | null;
   is_automated?: boolean;
+  // target position per account, replaces qty (market orders only)
+  position?: number | null;
+  // when the alert was sent, late ones are ignored
+  sent_at?: string | null;
+  // only these account names or ids, out of the target accounts
+  accounts?: string[] | null;
 }
 
 // what happened on one tradovate account

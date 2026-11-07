@@ -7,6 +7,7 @@ import uvicorn
 
 from app.config import Settings
 from app.context import AppContext
+from app.lock import AlreadyRunning
 from app.webapp import create_admin_app, create_ingress_app
 
 logger = logging.getLogger("localfill")
@@ -43,7 +44,11 @@ async def run():
     )
 
     ctx = AppContext(settings)
-    await ctx.start()
+    try:
+        await ctx.start()
+    except AlreadyRunning as exc:
+        logger.error("%s", exc)
+        raise SystemExit(1)
 
     ingress = make_server(create_ingress_app(ctx), settings.ingress_host, settings.ingress_port, settings.log_level)
     admin = make_server(create_admin_app(ctx), settings.admin_host, settings.admin_port, settings.log_level)
