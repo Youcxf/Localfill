@@ -6,6 +6,8 @@ import {
   ConnectionHealth,
   PnlResponse,
   PositionsResponse,
+  Preset,
+  PresetConfig,
   Settings,
   Signal,
   SignalCounts,
@@ -91,6 +93,21 @@ export class ApiService {
   // labels can hold spaces, so always encode them
   private connectionUrl(label: string) {
     return '/api/connections/' + encodeURIComponent(label);
+  }
+
+  // ---------- bracket presets ----------
+
+  presets() {
+    return this.http.get<Preset[]>('/api/presets');
+  }
+
+  // creates the preset or replaces the one with this name
+  savePreset(name: string, config: PresetConfig) {
+    return this.http.put<Preset>('/api/presets/' + encodeURIComponent(name), config);
+  }
+
+  deletePreset(name: string) {
+    return this.http.delete<void>('/api/presets/' + encodeURIComponent(name));
   }
 
   // ---------- trading ----------

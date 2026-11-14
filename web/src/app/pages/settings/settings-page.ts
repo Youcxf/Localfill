@@ -12,6 +12,10 @@ const SNIPPETS = [
     code: '{"action": "{{strategy.order.action}}", "symbol": "{{ticker}}", "qty": {{strategy.order.contracts}}}',
   },
   {
+    title: 'Strategy alert with a bracket preset and a stop in points',
+    code: '{"action": "{{strategy.order.action}}", "symbol": "{{ticker}}", "preset": "nq split", "stop_loss": 12}',
+  },
+  {
     title: 'Exit alert, close everything on the symbol',
     code: '{"action": "flatten", "symbol": "{{ticker}}"}',
   },

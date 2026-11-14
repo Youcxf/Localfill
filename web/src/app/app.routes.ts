@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './api/auth';
 import { Shell } from './layout/shell';
+import { BracketsPage } from './pages/brackets/brackets-page';
 import { ConnectionsPage } from './pages/connections/connections-page';
 import { LoginPage } from './pages/login/login-page';
 import { OrderPage } from './pages/order/order-page';
@@ -26,6 +27,7 @@ export const routes: Routes = [
       { path: 'positions', component: PositionsPage, title: 'Positions · localfill', data: { title: 'Positions' } },
       { path: 'pnl', component: PnlPage, title: 'P/L · localfill', data: { title: 'P/L' } },
       { path: 'order', component: OrderPage, title: 'Manual order · localfill', data: { title: 'Manual order' } },
+      { path: 'brackets', component: BracketsPage, title: 'Brackets · localfill', data: { title: 'Brackets' } },
       { path: 'settings', component: SettingsPage, title: 'Settings · localfill', data: { title: 'Settings' } },
     ],
   },

@@ -11,7 +11,7 @@ You can also try the dashboard API in your browser at http://localhost:8011/docs
 
 - [Things that are true everywhere](#things-that-are-true-everywhere)
 - [Webhook server](#webhook-server)
-- [Dashboard API](#dashboard-api): [auth](#auth), [status and settings](#status-and-settings), [connections](#connections), [trading](#trading), [live events](#live-events)
+- [Dashboard API](#dashboard-api): [auth](#auth), [status and settings](#status-and-settings), [connections](#connections), [bracket presets](#bracket-presets), [trading](#trading), [live events](#live-events)
 - [Data shapes](#data-shapes)
 
 ## Things that are true everywhere
@@ -48,6 +48,13 @@ The body is a signal, as JSON. TradingView sends it as `text/plain` when the mes
 | `accounts` | string list | | only these account names or ids, out of the target accounts |
 | `sent_at` | ISO date-time | | when the alert was sent. An alert older than the last one accepted for the same symbol, connection and accounts is saved as `duplicate` and not run |
 | `is_automated` | boolean | `true` | |
+| `preset` | string | | name of a [bracket preset](#bracket-presets). Its take profits set the size, so `qty` is not used |
+| `take_profits` | list of `{ "qty": int, "points": number }` | | the entry in parts, each leaving at `points` from the fill. Leave `points` out for a part that only has the stop. Wins over the preset's. Without any, the whole `qty` gets just the stop |
+| `stop_loss` | number, more than 0 | | the stop, in points from the fill. Wins over the preset's backup stop |
+| `stop_price` | number | | the stop as an exact price, instead of `stop_loss` |
+| `breakeven_after` | integer, 1 or more | | once take profit number n is reached, the stops of the parts that go further move to the entry |
+| `breakeven_ticks` | integer | `0` | how many ticks past the entry that moved stop goes (`2` locks in 2 ticks) |
+| `if_open` | `"reverse"`, `"replace"` or `"skip"` | `"reverse"` | what to do when the account already holds the contract, see below |
 
 For `flatten`, `symbol` (or `contract`) is optional. Without it every open position on every target account is closed.
 
@@ -57,7 +64,15 @@ In position mode each account waits after its order until Tradovate's position l
 
 `flatten` first cancels the account's working orders (only for that contract if one is given), then closes the positions.
 
-Orders (`placeorder`, `liquidateposition`) are never retried after they may have reached Tradovate. If the answer is a timeout or a 5xx, that account's result fails with an error saying the order may or may not have gone through.
+**Brackets.** Any of `preset`, `take_profits`, `stop_loss`, `stop_price`, `breakeven_after`, `breakeven_ticks` or `if_open` turns a buy or sell into one Tradovate order strategy: the entry, plus a take profit and a stop for each part. Tradovate places them right after the fill (or keeps them waiting with a limit or stop entry) and moves stops to breakeven itself, so this keeps working while localfill is off. Every bracket needs a stop, from the alert or the preset's backup stop. Brackets don't work with `position` or `flatten`. The size limit counts all parts together. A part's distances are rounded to the contract's tick size.
+
+- `stop_price` is exact. Tradovate only takes distances, so on a market order the stop starts at a distance and is moved to `stop_price` as soon as the fill is known. That first distance is measured from `price` if the alert sends it (`"price": {{close}}`), otherwise it is the preset's backup or max stop. On a limit or stop entry the distance is measured from `price`, which is exact. A `stop_price` already past the fill keeps the first stop and says so
+- the preset's `max_stop_loss` caps every stop, from `stop_loss` or `stop_price`. The alert can't lift it
+- breakeven waits for the price, not the fill: a quick touch of the take profit moves the stops even if it didn't fill
+- `if_open`: `reverse` closes an opposite position first (with its take profits and stop), a same side one gets the new bracket on top. `replace` closes any position first. `skip` sends nothing to an account that holds the contract (status `skipped, it already holds 2`)
+- Tradovate keeps a bracket's take profits and stop working when a plain order closes the position, and either could open a new one. So while a bracket localfill started is still running on an account: a plain buy or sell the other way closes the position and its bracket instead of being sent (`closed 10 with its take profits and stop, instead of sell 10`), `position` going flat or to the other side closes it the same way first, and a plain order on a flat account cancels the leftover orders first. `flatten` cancels them too
+
+Orders (`placeorder`, `startOrderStrategy`, `liquidateposition`) are never retried after they may have reached Tradovate. If the answer is a timeout or a 5xx, that account's result fails with an error saying the order may or may not have gone through.
 
 ```bash
 curl -X POST http://localhost:8010/hook/YOUR_TOKEN \
@@ -82,7 +97,7 @@ Signals are executed one at a time, in the order they arrived, so a `sell` follo
 
 ### `GET /health`
 
-`{ "status": "ok", "version": "0.1.0" }`. No token needed. Handy to check that your tunnel works.
+`{ "status": "ok", "version": "1.3.0" }`. No token needed. Handy to check that your tunnel works.
 
 ---
 
@@ -126,14 +141,14 @@ Ends the session. Answer `204`, no body.
 
 #### `GET /health`
 
-No login needed. `{ "status": "ok", "version": "0.1.0" }`. This is what the Docker healthcheck calls.
+No login needed. `{ "status": "ok", "version": "1.3.0" }`. This is what the Docker healthcheck calls.
 
 #### `GET /status`
 
 A summary for the top of the dashboard.
 
 ```json
-{ "version": "0.1.0", "dry_run": false, "connections_total": 1, "connections_online": 1 }
+{ "version": "1.3.0", "dry_run": false, "connections_total": 1, "connections_online": 1 }
 ```
 
 `connections_online` counts the connections that are logged in.
@@ -226,6 +241,44 @@ Tries to log in again, for a connection that failed at startup or lost its login
 #### `DELETE /connections/{label}`
 
 Logs out and forgets the connection. `204`, or `404`.
+
+### Bracket presets
+
+A preset is a bracket saved under a name. Alerts use it with `"preset": "<name>"`, and fields in the alert win over the preset's (except `max_stop_loss`).
+
+#### `GET /presets`
+
+Every preset, by name.
+
+```json
+[
+  {
+    "name": "nq split",
+    "take_profits": [{ "qty": 5, "points": 8 }, { "qty": 5, "points": 20 }],
+    "stop_loss": 15,
+    "max_stop_loss": 30,
+    "breakeven_after": 1,
+    "breakeven_ticks": 2,
+    "if_open": "reverse"
+  }
+]
+```
+
+| field | meaning |
+|-------|---------|
+| `take_profits` | the parts, like the alert field. Can be empty: then the alert's `qty` gets only the stop |
+| `stop_loss` | backup stop in points, used when the alert sends no stop. `null` means every alert must send one |
+| `max_stop_loss` | the farthest stop allowed in points. A farther one from an alert is moved in to it |
+| `breakeven_after`, `breakeven_ticks` | like the alert fields |
+| `if_open` | like the alert field |
+
+#### `PUT /presets/{name}`
+
+Creates the preset or replaces the one with that name. The body is the preset without `name`. Names are 1 to 50 letters, digits, spaces, dots, dashes or underscores. A preset that can't work is refused with `422`, for example breakeven after a take profit that no part goes further than.
+
+#### `DELETE /presets/{name}`
+
+`204`, or `404`. Alerts that use it fail with "there is no preset called ..." until it exists again.
 
 ### Trading
 
@@ -372,6 +425,7 @@ data: {"type": "signal", "data": { ...a signal record... }}
 | `signal` | a [signal record](#signalrecord) | a signal was received (`status: "pending"`) and again each time it changes (`done`, `failed`, ...). Match on `id` to update a row you already have |
 | `connections` | `null` | a connection was added, removed, changed or reconnected. Load `GET /connections` again |
 | `settings` | `null` | dry run or the token changed. Load `GET /settings` again |
+| `presets` | `null` | a bracket preset was saved or deleted. Load `GET /presets` again |
 
 Every 15 seconds a comment line (`: ping`) is sent so nothing closes the idle connection. `EventSource` ignores it.
 
@@ -414,6 +468,8 @@ One row of the history.
 | `action` | string | |
 | `symbol` | string or null | what was asked for |
 | `contract` | string or null | the contract that was used, like `MNQZ6` |
+| `qty` | integer or null | contracts per account, for a fixed size (`qty` or a bracket). `null` for `position` and `flatten` |
+| `bracket` | string or null | the take profits and stop that were used, like `5 at +8, 5 at +20, stop 12, breakeven after tp 1 +2 ticks` |
 | `total` | integer | how many accounts were tried |
 | `succeeded`, `failed` | integer | |
 | `results` | AccountResult list | one per account |
@@ -431,10 +487,11 @@ What happened on one Tradovate account.
 | `success` | boolean | |
 | `latency_ms` | number | how long this account took |
 | `order_id` | integer or null | Tradovate's order id |
-| `status` | string or null | Tradovate's own order status (`Filled`, `Working`, `Rejected`...). For a flatten: `closed 1 position(s)` or `nothing to close` |
+| `status` | string or null | Tradovate's own order status (`Filled`, `Working`, `Rejected`...). For a flatten: `closed 1 position(s)` or `nothing to close`. Notes are added after a comma, like `Filled, closed 2 first` or `Filled, stop at 19990` |
 | `fill_price` | number or null | the average price we really got |
 | `error` | string or null | why it failed |
 | `response` | object or null | Tradovate's raw answer, useful to debug a rejection |
+| `strategy_id` | integer or null | for a bracket, the Tradovate order strategy that holds its take profits and stop. `order_id` is its entry |
 
 A market order that Tradovate accepted and then rejected (market closed, margin, risk limits) has `success: false` and `status: "Rejected"`. localfill checks the real outcome for a couple of seconds instead of trusting the first answer.
 

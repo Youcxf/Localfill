@@ -14,6 +14,7 @@ function account(changes: Partial<AccountResult> = {}): AccountResult {
     fill_price: 20055.5,
     error: null,
     response: { orderId: 88214 },
+    strategy_id: null,
     ...changes,
   };
 }
@@ -24,6 +25,8 @@ function result(results: AccountResult[], changes: Partial<SignalResult> = {}): 
     action: 'buy',
     symbol: 'MNQ',
     contract: 'MNQZ6',
+    qty: null,
+    bracket: null,
     total: results.length,
     succeeded,
     failed: results.length - succeeded,
@@ -54,6 +57,25 @@ describe('signal rows', () => {
   it('adds the order type and price for a limit order', () => {
     const limit = record({ payload: { action: 'buy', symbol: 'MNQ', qty: 1, order_type: 'limit', price: 19980 } });
     expect(describeSignal(limit)).toBe('1 MNQ limit 19,980.00');
+  });
+
+  it('takes the size of a bracket from the result and names its preset', () => {
+    const bracket = record({
+      payload: { action: 'buy', symbol: 'MNQ', qty: 1, preset: 'nq split', stop_loss: 9 },
+      result: result([account()], { qty: 10, bracket: '5 at +8, 5 at +20, stop 9' }),
+    });
+
+    expect(describeSignal(bracket)).toBe('10 MNQ · nq split');
+    const detail = toDetail(bracket);
+    expect(detail.request.find((r) => r.k === 'qty')?.v).toBe('10');
+    expect(detail.request.find((r) => r.k === 'bracket')?.v).toBe('5 at +8, 5 at +20, stop 9');
+  });
+
+  it('describes a bracket that has not run yet from the alert', () => {
+    const pending = record({ payload: { action: 'sell', symbol: 'MNQ', qty: 2, stop_price: 20100 }, result: null });
+
+    expect(describeSignal(pending)).toBe('2 MNQ · bracket');
+    expect(toDetail(pending).request.find((r) => r.k === 'bracket')?.v).toBe('stop at 20,100.00');
   });
 
   it('describes a flatten by its symbol, or as all positions', () => {
@@ -102,6 +124,12 @@ describe('signal rows', () => {
 });
 
 describe('signal detail', () => {
+  it('keeps a long status short in the fill column', () => {
+    const closed = account({ fill_price: null, order_id: null, status: 'closed 10 with its take profits and stop, instead of sell 10' });
+    const row = toRow(record({ payload: { action: 'sell', symbol: 'MNQ', qty: 10 }, result: result([closed]) }));
+    expect(row.fill).toBe('closed 10');
+  });
+
   it('lists the request the way it was sent', () => {
     const detail = toDetail(record());
     expect(detail.when).toBe('2026-09-20 21:46:57 UTC');

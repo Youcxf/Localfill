@@ -24,6 +24,16 @@ form {
   line-height: 1.5;
 }
 
+/* the bracket picker is wide, the stop next to it is short */
+.two.wide {
+  grid-template-columns: minmax(0, 1fr) 160px;
+}
+
+/* the line that explains the bracket belongs to the fields above it */
+.two + .hint {
+  margin-top: -10px;
+}
+
 .summary {
   padding-top: 14px;
   border-top: 1px solid var(--rule);

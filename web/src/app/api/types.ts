@@ -3,6 +3,8 @@
 
 export type Action = 'buy' | 'sell' | 'flatten';
 export type OrderType = 'market' | 'limit' | 'stop';
+// what a bracket does when the account already holds the contract
+export type IfOpen = 'reverse' | 'replace' | 'skip';
 
 // pending = received and running, done = every account worked, partial = some failed,
 // failed = nothing worked, dry_run = dry run was on, duplicate = ignored,
@@ -34,6 +36,41 @@ export interface Signal {
   sent_at?: string | null;
   // only these account names or ids, out of the target accounts
   accounts?: string[] | null;
+  // brackets: any of these makes it an entry with take profits and a stop
+  preset?: string | null;
+  take_profits?: TakeProfit[] | null;
+  // points from the fill, or an exact price
+  stop_loss?: number | null;
+  stop_price?: number | null;
+  breakeven_after?: number | null;
+  breakeven_ticks?: number | null;
+  if_open?: IfOpen | null;
+}
+
+// ---------- bracket presets ----------
+
+// qty contracts that leave at points from the fill. no points means only the stop
+export interface TakeProfit {
+  qty: number;
+  points?: number | null;
+}
+
+// what you send to PUT /api/presets/{name}
+export interface PresetConfig {
+  take_profits: TakeProfit[];
+  // backup stop in points, used when the alert sends none
+  stop_loss: number | null;
+  // the farthest stop allowed, farther stops from alerts are moved in to it
+  max_stop_loss: number | null;
+  // once this take profit is reached, the stops of the parts that go further move to the entry
+  breakeven_after: number | null;
+  // ticks past the entry for that moved stop
+  breakeven_ticks: number;
+  if_open: IfOpen;
+}
+
+export interface Preset extends PresetConfig {
+  name: string;
 }
 
 // what happened on one tradovate account
@@ -48,12 +85,18 @@ export interface AccountResult {
   fill_price: number | null;
   error: string | null;
   response: Record<string, unknown> | null;
+  // the tradovate order strategy holding the take profits and stop
+  strategy_id: number | null;
 }
 
 export interface SignalResult {
   action: string;
   symbol: string | null;
   contract: string | null;
+  // contracts per account, when the alert asked for a fixed amount
+  qty: number | null;
+  // the take profits and stop used, like "5 at +8, 5 at +20, stop 12"
+  bracket: string | null;
   total: number;
   succeeded: number;
   failed: number;
@@ -177,4 +220,5 @@ export interface Status {
 export type SseEvent =
   | { type: 'signal'; data: SignalRecord }
   | { type: 'connections'; data: null }
-  | { type: 'settings'; data: null };
+  | { type: 'settings'; data: null }
+  | { type: 'presets'; data: null };

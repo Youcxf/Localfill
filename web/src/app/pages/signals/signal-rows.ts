@@ -37,18 +37,48 @@ export function toRow(record: SignalRecord): SignalRow {
   };
 }
 
-// "2 MNQ", "1 MNQ limit 19,980.00", or "MNQ" for a flatten
+// "2 MNQ", "1 MNQ limit 19,980.00", "10 MNQ · nq split", or "MNQ" for a flatten
 export function describe(record: SignalRecord): string {
   const payload = record.payload;
   const symbol = payload.symbol ?? '';
   if (payload.action === 'flatten') {
     return symbol || 'all positions';
   }
-  let text = `${payload.qty ?? 1} ${symbol}`;
+  // a preset sets the size itself, the result knows how many it was
+  let text = `${record.result?.qty ?? payload.qty ?? 1} ${symbol}`;
   if (payload.order_type && payload.order_type !== 'market' && payload.price != null) {
     text += ` ${payload.order_type} ${formatPrice(payload.price)}`;
   }
+  if (usesBracket(record)) {
+    text += ` · ${payload.preset ?? 'bracket'}`;
+  }
   return text;
+}
+
+// true when the signal asked for take profits or a stop
+export function usesBracket(record: SignalRecord): boolean {
+  const p = record.payload;
+  const fields = [p.preset, p.take_profits, p.stop_loss, p.stop_price, p.breakeven_after, p.breakeven_ticks, p.if_open];
+  return fields.some((value) => value != null);
+}
+
+// what the bracket was, the full one once it ran: "5 at +8, 5 at +20, stop 12"
+function bracketText(record: SignalRecord): string {
+  if (record.result?.bracket) {
+    return record.result.bracket;
+  }
+  const p = record.payload;
+  const words = [];
+  if (p.preset) {
+    words.push(p.preset);
+  }
+  if (p.stop_loss != null) {
+    words.push(`stop ${p.stop_loss}`);
+  }
+  if (p.stop_price != null) {
+    words.push(`stop at ${formatPrice(p.stop_price)}`);
+  }
+  return words.join(', ') || 'yes';
 }
 
 // the "fill" column: the price we got, or how many positions were closed
@@ -65,7 +95,9 @@ function fillText(record: SignalRecord): string {
   if (filled?.fill_price != null) {
     return formatPrice(filled.fill_price);
   }
-  return result.results.find((r) => r.status)?.status ?? '—';
+  // only the first words, the column is narrow: "closed 10 with its take profits..." becomes "closed 10"
+  const status = result.results.find((r) => r.status)?.status;
+  return status ? status.split(/,| with /)[0] : '—';
 }
 
 // ---------- the detail panel ----------
@@ -108,8 +140,15 @@ export function toDetail(record: SignalRecord): SignalDetail {
     if (payload.price != null) {
       request.push({ k: 'price', v: formatPrice(payload.price) });
     }
+    if (usesBracket(record)) {
+      request.push({ k: 'bracket', v: bracketText(record) });
+    }
   }
   request.push({ k: 'connection', v: payload.connection ?? 'all' });
+  if (result?.qty != null && payload.action !== 'flatten') {
+    // a preset can change the size, so show what was really asked for
+    request.find((item) => item.k === 'qty')!.v = String(result.qty);
+  }
 
   return {
     id: record.id,

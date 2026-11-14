@@ -21,6 +21,7 @@ export class Sidebar {
     { path: '/positions', label: 'Positions' },
     { path: '/pnl', label: 'P/L' },
     { path: '/order', label: 'Manual order' },
+    { path: '/brackets', label: 'Brackets' },
     { path: '/settings', label: 'Settings' },
   ];
 

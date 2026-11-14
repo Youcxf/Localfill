@@ -65,7 +65,7 @@ Tell localfill your public address by setting `LOCALFILL_PUBLIC_URL` in `.env` (
 curl https://your-address/health
 ```
 
-You should get `{"status":"ok","version":"0.1.0"}`. That proves the whole path works. Now turn on dry run (`PATCH /api/settings` with `{ "dry_run": true }`) and send a test alert:
+You should get `{"status":"ok","version":"1.3.0"}`. That proves the whole path works. Now turn on dry run (`PATCH /api/settings` with `{ "dry_run": true }`) and send a test alert:
 
 ```bash
 curl -X POST https://your-address/hook/YOUR_TOKEN \

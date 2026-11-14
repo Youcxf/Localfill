@@ -6,6 +6,7 @@ import secrets
 from app.crypto import Crypto
 from app.db import Database
 from app.lock import DataDirLock
+from app.services.brackets import Brackets
 from app.services.connections import ConnectionManager
 from app.services.dispatcher import Dispatcher
 from app.services.events import EventBus
@@ -41,7 +42,8 @@ class AppContext:
         self.crypto = Crypto(os.path.join(self.settings.data_dir, "secret.key"))
 
         self.manager = ConnectionManager(self.db, self.crypto, self.settings)
-        self.dispatcher = Dispatcher(self.manager, self.resolver)
+        self.brackets = Brackets(self.db)
+        self.dispatcher = Dispatcher(self.manager, self.resolver, self.brackets)
         self.reports = Reports(self.manager, self.resolver)
         self.processor = SignalProcessor(self.db, self.dispatcher, self.events, self.settings)
 

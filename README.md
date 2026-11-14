@@ -12,6 +12,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
 [![Docker Image Size](https://img.shields.io/docker/image-size/youcxf/localfill/latest?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/youcxf/localfill)
 [![Self-Hosted](https://img.shields.io/badge/Self--Hosted-Yes-success?style=flat-square&logo=home-assistant&logoColor=white)](#)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/youcxf)
 
 
 <a href="https://alternativeto.net/software/localfill/about/?utm_source=badge&utm_medium=referral">
@@ -25,12 +26,13 @@ A self-hosted trade copier and webhook automation server for **Tradovate**. Auto
 
 A free, private alternative to **PickMyTrade, TradersPost, Tradesyncer, or Replikanto** credentials and encryption keys stay strictly on your local machine. Works seamlessly with prop firm accounts (Apex Trader Funding, Topstep, etc.) with or without a paid Tradovate API subscription.
 
-> **Current Version** : <ins>1.2.0</ins>
+> **Current Version** : <ins>1.3.0</ins>
 
 ## Features
 
 - **Copy trading:** one alert goes to every target account, on several logins at once, all sent at the same time. Choose the target accounts per login. It copies alerts, not trades you place by hand on Tradovate
 - **Position sync:** send the position you want instead of a quantity, and each account sends only what it needs to get there. Accounts that missed an alert, got a partial fill or went offline catch up on the next one
+- **Take profits and stops:** split an entry into parts with their own take profit, a stop from the alert or a backup one, and breakeven after the first take profit. Tradovate holds them, so they keep working when localfill is off. Save them as presets in the dashboard
 - Orders are never resent after an unclear answer, so a timeout can't place a double order
 - Safety limits: max contracts per alert, late alerts ignored, a second copy of localfill refuses to start
 - New Tradovate accounts get no orders until you select them, closed accounts are skipped
@@ -127,6 +129,28 @@ Things position mode can't decide for you:
 - Working limit or stop orders aren't counted, only filled positions.
 - A login Tradovate refuses (wrong password, captcha) is not retried, so use **Reconnect** once it is fixed. Logins are also never retried more than 3 times a minute after refused tokens.
 
+### Take profits and stops
+
+Add take profits and a stop to a buy or sell and Tradovate places them with the entry, as one order strategy. Tradovate holds them and moves the stop to breakeven by itself, so they keep working while localfill is off.
+
+```json
+{"action": "{{strategy.order.action}}", "symbol": "{{ticker}}",
+ "take_profits": [{"qty": 5, "points": 8}, {"qty": 5, "points": 20}],
+ "stop_loss": 12, "breakeven_after": 1, "breakeven_ticks": 2}
+```
+
+That buys (or sells) 10 contracts: 5 leave at 8 points, 5 at 20 points, all with a 12 point stop. Once price reaches the first take profit, the stop of the 20 point part moves to the entry plus 2 ticks.
+
+Save the same thing as a preset on the **Brackets** page and the alert gets short: `{"action": "{{strategy.order.action}}", "symbol": "{{ticker}}", "preset": "nq split", "stop_loss": 12}`. Fields in the alert win over the preset's.
+
+- **Size:** the parts set it and `qty` is not used. A part without `points` only has the stop. With a stop and no take profits at all, `qty` gets just the stop.
+- **Stop:** `stop_loss` in points, or `stop_price` as an exact price. Tradovate only takes distances, so on a market order the stop is moved to `stop_price` right after the fill. Also send `"price": {{close}}` so it starts close. A preset can have a backup stop for alerts that send none, and a max stop that a farther stop from an alert is moved in to. Every bracket needs a stop.
+- **Already in a position:** `if_open` (or the preset) decides. `reverse`, the default, closes an opposite position first and adds to a same side one. `replace` closes any position first. `skip` leaves that account alone.
+- **Exits:** use `flatten`, or let the take profits and stop do it. Tradovate keeps a bracket's orders working when a plain order closes the position, and they could open a new one. So while a bracket is open, a plain buy or sell the other way closes it together with its orders instead of being sent as is.
+- Breakeven reacts to the price touching the take profit, so a quick spike can move the stop even if the take profit didn't fill.
+- Doesn't work with `position`.
+- Checked on a real prop evaluation account (Lucid, website login). Tradovate's own website turns breakeven off for NQ and MNQ on its simulated accounts, so some accounts may refuse it.
+
 ### Accounts
 
 - With **every account** picked, only the accounts that existed when you picked it get orders. A new account added on Tradovate later (a new evaluation, say) gets nothing until you select it, or pick every account again.
@@ -146,6 +170,13 @@ Things position mode can't decide for you:
 | `accounts` | | only these account names or ids, out of the target accounts. Example `["APEX-1", "APEX-2"]` |
 | `sent_at` | | when the alert was sent (`"{{timenow}}"`), used to ignore alerts that arrive late |
 | `is_automated` | `true` | passed to Tradovate |
+| `preset` | | a bracket preset from the **Brackets** page (see [take profits and stops](#take-profits-and-stops)) |
+| `take_profits` | | the entry in parts, like `[{"qty": 5, "points": 8}, {"qty": 5, "points": 20}]` |
+| `stop_loss` | | stop in points from the fill |
+| `stop_price` | | stop as an exact price, instead of `stop_loss` |
+| `breakeven_after` | | move the stops of the parts that go further once this take profit (1, 2...) is reached |
+| `breakeven_ticks` | `0` | ticks past the entry for that moved stop |
+| `if_open` | `reverse` | `reverse`, `replace` or `skip`, when the account already holds the contract |
 
 Other fields are ignored.
 
@@ -228,7 +259,7 @@ api/app/
   crypto.py        password encryption
   models.py        request and answer shapes
   routes/          http endpoints
-  services/        dispatcher, signals, connections, reports
+  services/        dispatcher, signals, connections, reports, brackets
   tradovate/       login, api client, front month lookup
   devtools/        fake Tradovate (also fakes fills, positions, P/L)
 api/tests/
@@ -245,13 +276,17 @@ The dashboard only uses the API, so you can build your own: [docs/frontend.md](d
 
 ## Future features (to add)
 
-- Bracket orders (stop loss and take profit on entry)
+- Trailing stops on brackets (Tradovate supports them, localfill doesn't send them yet)
 - Per-account size multiplier and risk limits such as a daily loss stop
 - Copying trades placed by hand on a lead account
 - Testing position sync, rollover detection, flatten's order cancelling, throttling and the reconnect loop on a real account
 - Websocket streaming from Tradovate (everything is polled)
 - Testing orders, flatten and P/L on a real account. The fill pairs in `/api/pnl` assume Tradovate only returns the requested account's pairs. `realized_pnl` comes straight from Tradovate
 - Dashboard sessions are in memory, so a restart logs you out
+
+## Support
+
+localfill is free and stays free. If it saves you a subscription and you want to give something back, you can buy me a coffee on [Ko-fi](https://ko-fi.com/youcxf). Bug reports and feature ideas help just as much.
 
 ## License
 

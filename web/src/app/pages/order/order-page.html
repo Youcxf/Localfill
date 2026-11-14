@@ -48,7 +48,7 @@
           min="1"
           step="1"
           class="input mono"
-          [disabled]="isFlatten()"
+          [disabled]="isFlatten() || presetQty() !== null"
           [(ngModel)]="qty"
         />
       </div>
@@ -81,6 +81,39 @@
         [(ngModel)]="price"
       />
     </div>
+
+    <div class="two wide">
+      <div class="field">
+        <label for="preset" [class.muted]="isFlatten()">Bracket</label>
+        <select id="preset" name="preset" class="input" [disabled]="isFlatten()" [(ngModel)]="preset">
+          <option value="">None</option>
+          @for (p of presets(); track p.name) {
+            <option [value]="p.name">{{ p.name }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="stop" [class.muted]="isFlatten()">Stop, points</label>
+        <input
+          id="stop"
+          name="stop"
+          class="input mono"
+          inputmode="decimal"
+          autocomplete="off"
+          [placeholder]="chosenPreset()?.stop_loss != null ? 'preset: ' + chosenPreset()?.stop_loss : 'none'"
+          [disabled]="isFlatten()"
+          [(ngModel)]="stopLoss"
+        />
+      </div>
+    </div>
+    @if (presetSummary() && !isFlatten()) {
+      <span class="hint mono">{{ presetSummary() }}</span>
+    } @else if (!isFlatten()) {
+      <span class="hint">
+        A stop alone sends the order with a stop loss that Tradovate places with it. Presets are made on the
+        Brackets page.
+      </span>
+    }
 
     <div class="field">
       <label for="connection">Connection</label>
@@ -133,8 +166,8 @@
         <dt class="muted">sent</dt>
         <dd>{{ sent() }}</dd>
         @for (item of d.request; track item.k) {
-          @if (item.k === 'contract') {
-            <dt class="muted">contract</dt>
+          @if (item.k === 'contract' || item.k === 'bracket') {
+            <dt class="muted">{{ item.k }}</dt>
             <dd>{{ item.v }}</dd>
           }
         }

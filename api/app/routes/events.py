@@ -11,7 +11,7 @@ router = APIRouter(tags=["events"], dependencies=[Depends(require_login)])
 
 # live updates for the dashboard (server sent events)
 # every message is one line: data: {"type": "...", "data": ...}
-# types: "signal" (a signal was received or finished), "connections", "settings"
+# types: "signal" (a signal was received or finished), "connections", "settings", "presets"
 @router.get("/events")
 async def events(ctx=Depends(get_ctx)):
     queue = ctx.events.subscribe()

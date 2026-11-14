@@ -1,0 +1,159 @@
+/* the saved presets on the left, the one being edited on the right */
+.page {
+  display: flex;
+  min-height: 100%;
+}
+
+aside {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--rule);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 24px 24px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* one preset per row, its name and what it does */
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 24px;
+  border: 0;
+  border-bottom: 1px solid var(--rule-soft);
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.row.selected {
+  border-left-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.row strong {
+  font-weight: 600;
+}
+
+.row .mono {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.empty {
+  padding: 16px 24px;
+  line-height: 1.5;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 600px;
+  padding: 24px;
+}
+
+.name {
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+/* contracts, points, remove */
+.parts {
+  display: grid;
+  grid-template-columns: 110px 170px auto;
+  gap: 6px 10px;
+  align-items: center;
+  justify-items: start;
+}
+
+.parts .input {
+  width: 100%;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.add {
+  align-self: flex-start;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.hint {
+  line-height: 1.5;
+}
+
+.below {
+  margin-top: -8px;
+}
+
+.seg {
+  width: 300px;
+}
+
+.seg button {
+  height: 32px;
+}
+
+.summary {
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  line-height: 1.55;
+}
+
+.summary strong {
+  font-weight: 600;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.alert {
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.alert-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+pre {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--bg-field);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  /* break at spaces first, inside a word only when it has to */
+  overflow-wrap: anywhere;
+}

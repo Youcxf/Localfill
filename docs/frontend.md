@@ -66,7 +66,7 @@ web/src/
 A few habits that keep it easy to follow:
 
 - Standalone components, signals for state, `@if` and `@for` in templates. No zone.js.
-- Each page that turns api data into words and numbers keeps that in a small plain file next to it (`signal-rows.ts`, `position-groups.ts`, `pnl-accounts.ts`, `connection-cards.ts`). They are plain functions, which makes them easy to read and to test.
+- Each page that turns api data into words and numbers keeps that in a small plain file next to it (`signal-rows.ts`, `position-groups.ts`, `pnl-accounts.ts`, `connection-cards.ts`, `preset-form.ts`). They are plain functions, which makes them easy to read and to test.
 - No UI library. The look is a few hundred lines of CSS in `styles.css` plus a small stylesheet per component.
 
 ## Screens and the endpoints they use
@@ -79,7 +79,8 @@ A few habits that keep it easy to follow:
 | Connections | list of logins with their accounts. Add, remove, reconnect, and tick which accounts receive orders | `GET /connections`, `POST /connections`, `PATCH /connections/{label}`, `POST /connections/{label}/reconnect`, `DELETE /connections/{label}` |
 | Positions | open positions grouped by contract, a notice when you are in two contract months, and flatten per contract or for everything | `GET /positions`, `POST /flatten` |
 | P/L | realized P/L of the day in one big figure, per account, and the round trips of the account you pick | `GET /pnl` |
-| Manual order | buy, sell or flatten from the dashboard, and the result per account | `POST /signals` |
+| Manual order | buy, sell or flatten from the dashboard, optionally with a bracket preset or a stop, and the result per account | `POST /signals`, `GET /presets` |
+| Brackets | the saved bracket presets: take profits per part, backup and max stop, breakeven, what to do when an account is already in a position, and the alert message that uses it | `GET /presets`, `PUT /presets/{name}`, `DELETE /presets/{name}`, events `presets` |
 | Settings | dry run, the webhook URL (hidden until you reveal it), regenerate it, ready made TradingView messages | `GET /settings`, `PATCH /settings`, `POST /settings/webhook-token/regenerate` |
 
 ## Log in and log out

@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import json
 import math
 import secrets
 import sys
@@ -32,6 +33,10 @@ FRONT_MATURITIES = [11, 13]
 # dollars per point
 POINT_VALUE = {"MNQ": 2.0, "ES": 50.0}
 BASE_PRICE = {"MNQ": 20000.0, "ES": 6000.0}
+TICK_SIZE = {"MNQ": 0.25, "ES": 0.25}
+
+# in /orderStrategyLink the entry order has this label, the brackets have "0", "1"...
+ENTRY_LABEL = "256"
 
 
 def now_text():
@@ -70,9 +75,18 @@ class FakeBroker:
         # seconds every placeorder takes, to test what happens when orders are slow
         self.order_delay = 0.0
 
+        # order strategies (brackets): id -> strategy
+        self.strategies = {}
+        # answer startOrderStrategy with this errorText instead of starting it
+        self.refuse_strategies = None
+        # start strategies without placing their take profits and stop
+        self.skip_brackets = False
+
         # what we received, so tests can look at it
         self.logins = []
         self.order_requests = []
+        self.strategy_requests = []
+        self.modify_requests = []
 
     def price_of(self, contract):
         if self.fixed_price is not None:
@@ -126,6 +140,12 @@ class FakeBroker:
         contract_id = int(request.query["id"])
         found = [c for c in CONTRACTS if c["id"] == contract_id]
         return web.json_response(found[0] if found else {})
+
+    async def product_find(self, request):
+        name = request.query.get("name", "")
+        if name not in TICK_SIZE:
+            return web.json_response({"errorText": "not found"}, status=404)
+        return web.json_response({"name": name, "tickSize": TICK_SIZE[name], "valuePerPoint": POINT_VALUE[name]})
 
     # ---------- orders ----------
 
@@ -207,11 +227,161 @@ class FakeBroker:
         if not position or position["netPos"] == 0:
             return web.json_response({"failureReason": "UnknownReason", "failureText": "no position"})
         contract = [c for c in CONTRACTS if c["id"] == body["contractId"]][0]
+        for strategy in self.strategies.values():
+            if strategy["accountId"] == body["accountId"] and strategy["contractId"] == body["contractId"]:
+                self.end_strategy(strategy, "ExecutionInterrupted")
         order_id = next(self.ids)
         action = "Sell" if position["netPos"] > 0 else "Buy"
         self.orders[order_id] = {"id": order_id, "accountId": body["accountId"], "ordStatus": "Filled"}
         self.add_fill(body["accountId"], contract, action, abs(position["netPos"]), order_id)
         return web.json_response({"orderId": order_id})
+
+    # ---------- order strategies (brackets) ----------
+
+    # like the real one: the entry, then per bracket a take profit (limit) and a stop, each pair
+    # cancels its other side when one fills. a plain order that closes the position leaves them
+    # working, liquidate cancels them
+    async def start_strategy(self, request):
+        body = await request.json()
+        self.strategy_requests.append(body)
+        if self.refuse_strategies:
+            return web.json_response({"errorText": self.refuse_strategies})
+        found = [c for c in CONTRACTS if c["name"] == body["symbol"]]
+        if not found:
+            return web.json_response({"errorText": "unknown symbol"})
+        contract = found[0]
+        params = json.loads(body["params"])
+        entry = params["entryVersion"]
+
+        strategy_id = next(self.ids)
+        strategy = {
+            "id": strategy_id, "accountId": body["accountId"], "contractId": contract["id"],
+            "action": body["action"], "status": "ActiveStrategy", "params": body["params"],
+            "brackets": params["brackets"],
+        }
+        self.strategies[strategy_id] = strategy
+
+        entry_id = next(self.ids)
+        is_market = entry["orderType"] == "Market"
+        self.orders[entry_id] = {
+            "id": entry_id, "accountId": body["accountId"], "contractId": contract["id"], "action": body["action"],
+            "ordStatus": "Filled" if is_market else "Working", "orderType": entry["orderType"],
+            "orderQty": entry["orderQty"], "price": entry.get("price"), "stopPrice": entry.get("stopPrice"),
+            "strategyId": strategy_id, "label": ENTRY_LABEL,
+        }
+        if is_market:
+            self.add_fill(body["accountId"], contract, body["action"], entry["orderQty"], entry_id)
+            self.place_brackets(strategy, self.fills[-1]["price"], "Working")
+        else:
+            # waiting for the entry, priced from the entry price
+            self.place_brackets(strategy, entry.get("price") or entry.get("stopPrice"), "Suspended")
+        answer = {key: strategy[key] for key in ("id", "accountId", "contractId", "action", "status", "params")}
+        return web.json_response({"orderStrategy": answer})
+
+    def place_brackets(self, strategy, entry_price, status):
+        if self.skip_brackets:
+            return
+        side = 1 if strategy["action"] == "Buy" else -1
+        exit_action = "Sell" if side == 1 else "Buy"
+        for number, bracket in enumerate(strategy["brackets"]):
+            common = {
+                "accountId": strategy["accountId"], "contractId": strategy["contractId"], "action": exit_action,
+                "ordStatus": status, "orderQty": bracket["qty"], "strategyId": strategy["id"], "label": str(number),
+            }
+            if "profitTarget" in bracket:
+                order_id = next(self.ids)
+                target = entry_price + bracket["profitTarget"]
+                self.orders[order_id] = dict(common, id=order_id, orderType="Limit", price=target, stopPrice=None)
+            order_id = next(self.ids)
+            stop = dict(common, id=order_id, orderType="Stop", price=None, stopPrice=entry_price + bracket["stopLoss"])
+            if "breakeven" in bracket:
+                # once price is this far in profit the stop goes to entry + breakevenPlus
+                stop["breakeven"] = (entry_price + side * bracket["breakeven"], entry_price + bracket.get("breakevenPlus", 0))
+            self.orders[order_id] = stop
+
+    def strategy_orders(self, strategy):
+        return [o for o in self.orders.values() if o.get("strategyId") == strategy["id"]]
+
+    def end_strategy(self, strategy, status):
+        if strategy["status"] != "ActiveStrategy":
+            return
+        for order in self.strategy_orders(strategy):
+            if order["ordStatus"] in ("Working", "Suspended"):
+                order["ordStatus"] = "Canceled"
+                self.cancelled_orders.append(order["id"])
+        strategy["status"] = status
+
+    # tests call this to move the market: stops move to breakeven, brackets fill and cancel their other side
+    def move_to(self, price):
+        self.fixed_price = price
+        for strategy in self.strategies.values():
+            if strategy["status"] != "ActiveStrategy":
+                continue
+            contract = [c for c in CONTRACTS if c["id"] == strategy["contractId"]][0]
+            orders = self.strategy_orders(strategy)
+            entry = [o for o in orders if o["label"] == ENTRY_LABEL][0]
+            if entry["ordStatus"] == "Working" and self.touches(entry, price):
+                entry["ordStatus"] = "Filled"
+                self.add_fill(strategy["accountId"], contract, entry["action"], entry["orderQty"], entry["id"])
+                for order in orders:
+                    if order["ordStatus"] == "Suspended":
+                        order["ordStatus"] = "Working"
+            for order in orders:
+                if order["ordStatus"] != "Working" or order["label"] == ENTRY_LABEL:
+                    continue
+                if order.get("breakeven"):
+                    trigger, new_stop = order["breakeven"]
+                    if (order["action"] == "Sell" and price >= trigger) or (order["action"] == "Buy" and price <= trigger):
+                        order["stopPrice"] = new_stop
+                        order["breakeven"] = None
+                if self.touches(order, price):
+                    order["ordStatus"] = "Filled"
+                    self.add_fill(strategy["accountId"], contract, order["action"], order["orderQty"], order["id"])
+                    # the other side of the same bracket
+                    for other in orders:
+                        if other["label"] == order["label"] and other["ordStatus"] == "Working":
+                            other["ordStatus"] = "Canceled"
+            if not any(o["ordStatus"] in ("Working", "Suspended") for o in self.strategy_orders(strategy)):
+                strategy["status"] = "Completed"
+
+    # would this limit or stop order fill at price
+    def touches(self, order, price):
+        buy = order["action"] == "Buy"
+        if order["orderType"] == "Limit":
+            return price <= order["price"] if buy else price >= order["price"]
+        if order["orderType"] == "Stop":
+            return price >= order["stopPrice"] if buy else price <= order["stopPrice"]
+        return False
+
+    async def strategy_links(self, request):
+        strategy = self.strategies.get(int(request.query["masterid"]))
+        if strategy is None:
+            return web.json_response([])
+        rows = [{"id": o["id"], "orderId": o["id"], "label": o["label"]} for o in self.strategy_orders(strategy)]
+        return web.json_response(rows)
+
+    async def strategy_items(self, request):
+        ids = [int(i) for i in request.query.get("ids", "").split(",") if i]
+        keys = ("id", "accountId", "contractId", "status")
+        return web.json_response([{k: s[k] for k in keys} for i, s in self.strategies.items() if i in ids])
+
+    async def order_versions(self, request):
+        order = self.orders.get(int(request.query["masterid"]))
+        if order is None:
+            return web.json_response([])
+        keys = ("orderType", "orderQty", "price", "stopPrice")
+        return web.json_response([dict({k: order.get(k) for k in keys}, orderId=order["id"])])
+
+    async def modify_order(self, request):
+        body = await request.json()
+        self.modify_requests.append(body)
+        order = self.orders.get(body["orderId"])
+        if order is None or order["ordStatus"] not in ("Working", "Suspended"):
+            return web.json_response({"failureReason": "TooLate"})
+        for key in ("orderQty", "price", "stopPrice"):
+            if key in body:
+                order[key] = body[key]
+        return web.json_response({"commandId": next(self.ids)})
 
     # ---------- lists ----------
 
@@ -238,10 +408,13 @@ class FakeBroker:
     async def cancel_order(self, request):
         body = await request.json()
         order = self.orders.get(body["orderId"])
-        if order is None or order["ordStatus"] != "Working":
+        if order is None or order["ordStatus"] not in ("Working", "Suspended"):
             return web.json_response({"failureReason": "UnknownReason", "failureText": "not working"})
         order["ordStatus"] = "Canceled"
         self.cancelled_orders.append(order["id"])
+        strategy = self.strategies.get(order.get("strategyId"))
+        if strategy and order.get("label") == ENTRY_LABEL:
+            self.end_strategy(strategy, "ExecutionInterrupted")
         return web.json_response({"orderId": order["id"]})
 
     # fills of one order (masterid = order id)
@@ -292,6 +465,7 @@ def make_app(broker=None):
     app.router.add_get("/v1/contract/suggest", broker.contract_suggest)
     app.router.add_get("/v1/contractMaturity/item", broker.maturity_item)
     app.router.add_get("/v1/contract/item", broker.contract_item)
+    app.router.add_get("/v1/product/find", broker.product_find)
     app.router.add_post("/v1/order/placeorder", broker.place_order)
     app.router.add_get("/v1/order/item", broker.order_item)
     app.router.add_post("/v1/order/liquidateposition", broker.liquidate)
@@ -302,6 +476,11 @@ def make_app(broker=None):
     app.router.add_post("/v1/order/cancelorder", broker.cancel_order)
     app.router.add_get("/v1/fillPair/list", broker.pair_list)
     app.router.add_get("/v1/cashBalance/list", broker.cash_list)
+    app.router.add_post("/v1/orderStrategy/startOrderStrategy", broker.start_strategy)
+    app.router.add_get("/v1/orderStrategy/items", broker.strategy_items)
+    app.router.add_get("/v1/orderStrategyLink/deps", broker.strategy_links)
+    app.router.add_get("/v1/orderVersion/deps", broker.order_versions)
+    app.router.add_post("/v1/order/modifyorder", broker.modify_order)
     return app
 
 

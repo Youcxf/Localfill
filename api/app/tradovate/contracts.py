@@ -13,6 +13,8 @@ class ContractResolver:
         self.cache = {}
         # contract id -> name
         self.names = {}
+        # product like MNQ -> its tick size
+        self.ticks = {}
 
     async def lookup(self, conn, symbol):
         cached = self.cache.get(symbol)
@@ -67,6 +69,16 @@ class ContractResolver:
         if contract.get("id") is None:
             raise ValueError(f"no contract id for '{symbol}'")
         return contract["id"]
+
+    # "MNQZ6" -> 0.25, the smallest price step. bracket prices have to land on it
+    async def tick_size(self, conn, contract_name):
+        product = contract_name[:-2]
+        if product not in self.ticks:
+            item = await conn.request("GET", f"/product/find?name={product}") or {}
+            if not item.get("tickSize"):
+                raise ValueError(f"tradovate did not give a tick size for {product}")
+            self.ticks[product] = item["tickSize"]
+        return self.ticks[product]
 
     # 123456 -> "MNQZ6". always asks tradovate for unknown ids, because a position can
     # sit in an old contract that is not the front month anymore

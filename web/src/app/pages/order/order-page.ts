@@ -1,9 +1,10 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../api/api.service';
-import { ConnectionHealth, Signal, SignalRecord } from '../../api/types';
+import { ConnectionHealth, Preset, Signal, SignalRecord } from '../../api/types';
 import { errorText } from '../../core/error-text';
 import { StatusBadge } from '../../shared/status-badge';
+import { summary, totalQty } from '../brackets/preset-form';
 import { describe, toDetail } from '../signals/signal-rows';
 
 type Action = 'buy' | 'sell' | 'flatten';
@@ -26,14 +27,32 @@ export class OrderPage {
   protected readonly price = signal('');
   // empty means every connection
   protected readonly connection = signal('');
+  // a bracket preset by name, empty for a plain order
+  protected readonly preset = signal('');
+  // stop in points, empty for none (or the preset's backup stop)
+  protected readonly stopLoss = signal('');
 
   protected readonly connections = signal<ConnectionHealth[]>([]);
+  protected readonly presets = signal<Preset[]>([]);
   protected readonly result = signal<SignalRecord | null>(null);
   protected readonly sending = signal(false);
   protected readonly error = signal('');
 
   protected readonly isFlatten = computed(() => this.action() === 'flatten');
   protected readonly needsPrice = computed(() => !this.isFlatten() && this.orderType() !== 'market');
+
+  protected readonly chosenPreset = computed(() => this.presets().find((p) => p.name === this.preset()) ?? null);
+
+  // a preset with take profits sets the size itself
+  protected readonly presetQty = computed(() => {
+    const preset = this.chosenPreset();
+    return preset && preset.take_profits.length ? totalQty(preset) : null;
+  });
+
+  protected readonly presetSummary = computed(() => {
+    const preset = this.chosenPreset();
+    return preset ? summary(preset) : '';
+  });
 
   // how many accounts and connections this order would go to
   protected readonly targets = computed(() => {
@@ -54,7 +73,7 @@ export class OrderPage {
     if (this.isFlatten()) {
       return `FLATTEN ${symbol || 'everything'}`;
     }
-    return `${this.action().toUpperCase()} ${this.qty() || 0} ${symbol || '(symbol)'}`;
+    return `${this.action().toUpperCase()} ${this.presetQty() ?? (this.qty() || 0)} ${symbol || '(symbol)'}`;
   });
 
   // "at market" or "as a limit order at 19,980"
@@ -62,7 +81,14 @@ export class OrderPage {
     if (this.isFlatten()) {
       return 'at market';
     }
-    return this.orderType() === 'market' ? 'at market' : `as a ${this.orderType()} order at ${this.price() || '(price)'}`;
+    let text = this.orderType() === 'market' ? 'at market' : `as a ${this.orderType()} order at ${this.price() || '(price)'}`;
+    if (this.preset()) {
+      text += ` with the ${this.preset()} bracket`;
+    }
+    if (this.stopLoss().trim()) {
+      text += `${this.preset() ? ' and' : ' with'} a ${this.stopLoss().trim()} point stop`;
+    }
+    return text;
   });
 
   // the finished signal in the words the history uses
@@ -83,6 +109,7 @@ export class OrderPage {
 
   constructor() {
     this.api.connections().subscribe((list) => this.connections.set(list));
+    this.api.presets().subscribe((list) => this.presets.set(list));
   }
 
   protected reset() {
@@ -92,6 +119,8 @@ export class OrderPage {
     this.orderType.set('market');
     this.price.set('');
     this.connection.set('');
+    this.preset.set('');
+    this.stopLoss.set('');
     this.error.set('');
   }
 
@@ -112,6 +141,12 @@ export class OrderPage {
       signal.order_type = this.orderType();
       if (this.needsPrice()) {
         signal.price = Number(this.price());
+      }
+      if (this.preset()) {
+        signal.preset = this.preset();
+      }
+      if (this.stopLoss().trim()) {
+        signal.stop_loss = Number(this.stopLoss());
       }
     }
     if (this.connection()) {
@@ -143,6 +178,12 @@ export class OrderPage {
     }
     if (this.needsPrice() && !(Number(this.price()) > 0)) {
       return 'A limit or stop order needs a price.';
+    }
+    if (!this.isFlatten() && this.stopLoss().trim() && !(Number(this.stopLoss()) > 0)) {
+      return 'The stop is in points and must be more than 0.';
+    }
+    if (!this.isFlatten() && this.chosenPreset()?.stop_loss == null && this.preset() && !this.stopLoss().trim()) {
+      return `The ${this.preset()} preset has no backup stop, enter one.`;
     }
     return '';
   }

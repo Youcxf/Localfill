@@ -17,6 +17,59 @@ SignalStatus = Literal["pending", "done", "partial", "failed", "dry_run", "dupli
 SIGNAL_STATUSES = ["pending", "done", "partial", "failed", "dry_run", "duplicate", "error"]
 
 
+# ---------- brackets: take profits and a stop that tradovate places with the entry ----------
+
+# what to do when an account already holds the contract a bracket signal trades.
+# reverse = close an opposite position first, add to a same side one. replace = close any
+# position first. skip = send nothing to that account
+IfOpen = Literal["reverse", "replace", "skip"]
+
+
+# one part of the entry: qty contracts that leave at points from the fill.
+# without points the part only has the stop (a runner)
+class TakeProfit(BaseModel):
+    qty: int = Field(ge=1)
+    points: float | None = Field(default=None, gt=0)
+
+
+# a bracket saved in the dashboard, alerts use it with "preset": "<name>"
+class PresetConfig(BaseModel):
+    take_profits: list[TakeProfit] = Field(default_factory=list, max_length=10)
+    # backup stop in points, used when the alert sends no stop
+    stop_loss: float | None = Field(default=None, gt=0)
+    # the farthest stop allowed in points, a farther stop from an alert is moved in to it
+    max_stop_loss: float | None = Field(default=None, gt=0)
+    # once take profit number n is reached, the stops of the parts that go further move to the entry
+    breakeven_after: int | None = Field(default=None, ge=1)
+    # how many ticks past the entry that moved stop goes (2 = locks in 2 ticks)
+    breakeven_ticks: int = 0
+    if_open: IfOpen = "reverse"
+
+    @model_validator(mode="after")
+    def check_preset(self):
+        check_breakeven(self.take_profits, self.breakeven_after)
+        if self.stop_loss and self.max_stop_loss and self.stop_loss > self.max_stop_loss:
+            raise ValueError("the backup stop is farther than the max stop")
+        return self
+
+
+class Preset(PresetConfig):
+    name: str = Field(min_length=1, max_length=50, pattern=r"^[\w .-]+$")
+
+
+# breakeven needs a take profit to wait for and a part that goes further than it
+def check_breakeven(take_profits, breakeven_after):
+    if breakeven_after is None:
+        return
+    if breakeven_after > len(take_profits):
+        raise ValueError(f"breakeven_after is {breakeven_after} but there are only {len(take_profits)} take profits")
+    trigger = take_profits[breakeven_after - 1].points
+    if trigger is None:
+        raise ValueError(f"take profit {breakeven_after} has no points, so breakeven can not wait for it")
+    if not any(part.points is None or part.points > trigger for part in take_profits):
+        raise ValueError(f"no part goes further than take profit {breakeven_after}, so there is no stop to move")
+
+
 # ---------- signals: what tradingview sends us ----------
 
 class Signal(BaseModel):
@@ -41,8 +94,19 @@ class Signal(BaseModel):
     # lets two strategies trade the same symbol on different accounts
     accounts: list[str] | None = None
 
+    # brackets. any of these turns the order into an entry with take profits and a stop,
+    # the fields given here win over the ones of the preset
+    preset: str | None = None
+    take_profits: list[TakeProfit] | None = Field(default=None, max_length=10)
+    # the stop, as points from the fill or as an exact price
+    stop_loss: float | None = Field(default=None, gt=0)
+    stop_price: float | None = Field(default=None, gt=0)
+    breakeven_after: int | None = Field(default=None, ge=1)
+    breakeven_ticks: int | None = None
+    if_open: IfOpen | None = None
+
     # tradingview sends "buy" but some people write "Buy", so lowercase it
-    @field_validator("action", "order_type", mode="before")
+    @field_validator("action", "order_type", "if_open", mode="before")
     @classmethod
     def lowercase(cls, value):
         if isinstance(value, str):
@@ -60,11 +124,20 @@ class Signal(BaseModel):
             value = value[:-2]
         return value or None
 
+    # true when the alert asks for take profits or a stop
+    @property
+    def uses_bracket(self):
+        fields = (self.preset, self.take_profits, self.stop_loss, self.stop_price,
+                  self.breakeven_after, self.breakeven_ticks, self.if_open)
+        return any(value is not None for value in fields)
+
     @model_validator(mode="after")
     def check_fields(self):
         if self.action == "flatten":
             if self.position is not None:
                 raise ValueError("flatten does not take a position, use position 0 instead")
+            if self.uses_bracket:
+                raise ValueError("flatten does not take take profits or a stop")
             return self
         if not self.symbol:
             raise ValueError("symbol is required for buy and sell")
@@ -72,6 +145,15 @@ class Signal(BaseModel):
             raise ValueError("price is required for limit and stop orders")
         if self.position is not None and self.order_type != "market":
             raise ValueError("position only works with market orders")
+        if self.uses_bracket:
+            # a take profit filling changes the position, the next position alert would buy it back
+            if self.position is not None:
+                raise ValueError("take profits and stops do not work with position, use qty")
+            if self.stop_loss is not None and self.stop_price is not None:
+                raise ValueError("send stop_loss or stop_price, not both")
+            # with a preset the take profits may come from it, so this is checked again later
+            if self.take_profits is not None and self.preset is None:
+                check_breakeven(self.take_profits, self.breakeven_after)
         return self
 
 
@@ -91,6 +173,8 @@ class AccountResult(Output):
     error: str | None = None
     # the raw tradovate answer, handy when something gets rejected
     response: dict | None = None
+    # the tradovate order strategy that holds the take profits and stop, for bracket orders
+    strategy_id: int | None = None
 
 
 # what happened for a whole signal (all accounts together)
@@ -98,6 +182,10 @@ class SignalResult(Output):
     action: str
     symbol: str | None = None
     contract: str | None = None
+    # contracts per account, when the alert asked for a fixed amount
+    qty: int | None = None
+    # the take profits and stop that were used, like "5 at +8, 5 at +20, stop 12"
+    bracket: str | None = None
     total: int
     succeeded: int
     failed: int

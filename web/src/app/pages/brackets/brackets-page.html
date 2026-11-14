@@ -1,0 +1,197 @@
+<div class="page">
+  <aside aria-label="Presets">
+    <div class="head">
+      <h2>Presets</h2>
+      <button type="button" class="link" (click)="startNew()">New preset</button>
+    </div>
+    @for (row of rows(); track row.name) {
+      <button type="button" class="row" [class.selected]="row.name === editing()" (click)="edit(row.name)">
+        <strong>{{ row.name }}</strong>
+        <span class="mono muted">{{ row.summary }}</span>
+      </button>
+    } @empty {
+      @if (loaded()) {
+        <p class="muted empty">
+          None yet. A preset is a set of take profits and a stop that any alert can use with
+          <span class="mono">"preset": "name"</span>.
+        </p>
+      }
+    }
+  </aside>
+
+  <form (ngSubmit)="save()">
+    <div class="field">
+      <label for="name">Name</label>
+      @if (editing()) {
+        <p class="mono name">{{ editing() }}</p>
+      } @else {
+        <input
+          id="name"
+          name="name"
+          class="input"
+          placeholder="nq split"
+          autocomplete="off"
+          [ngModel]="form().name"
+          (ngModelChange)="set('name', $event)"
+        />
+      }
+    </div>
+
+    <div class="field">
+      <span class="label">Take profits</span>
+      <div class="parts">
+        <span class="muted small">Contracts</span>
+        <span class="muted small">Points from the fill</span>
+        <span></span>
+        @for (part of form().parts; track $index; let i = $index) {
+          <input
+            class="input mono"
+            type="text"
+            inputmode="numeric"
+            [attr.aria-label]="'Contracts of part ' + (i + 1)"
+            [name]="'qty-' + i"
+            [ngModel]="part.qty"
+            (ngModelChange)="setPart(i, 'qty', $event)"
+          />
+          <input
+            class="input mono"
+            type="text"
+            inputmode="decimal"
+            placeholder="stop only"
+            [attr.aria-label]="'Take profit of part ' + (i + 1)"
+            [name]="'points-' + i"
+            [ngModel]="part.points"
+            (ngModelChange)="setPart(i, 'points', $event)"
+          />
+          <button type="button" class="link quiet" (click)="removePart(i)">Remove</button>
+        }
+      </div>
+      <button type="button" class="link add" (click)="addPart()">Add a part</button>
+      <span class="hint">
+        Each part leaves at its own take profit, and together they set the size: the alert's
+        <span class="mono">qty</span> is not used. A part without points only has the stop. With no parts at all,
+        the alert's <span class="mono">qty</span> gets just the stop.
+      </span>
+    </div>
+
+    <div class="two">
+      <div class="field">
+        <label for="stop">Backup stop, points</label>
+        <input
+          id="stop"
+          name="stop"
+          class="input mono"
+          inputmode="decimal"
+          placeholder="none"
+          [ngModel]="form().stopLoss"
+          (ngModelChange)="set('stopLoss', $event)"
+        />
+        <span class="hint">Used when the alert sends no <span class="mono">stop_loss</span> or <span class="mono">stop_price</span>.</span>
+      </div>
+      <div class="field">
+        <label for="max-stop">Max stop, points</label>
+        <input
+          id="max-stop"
+          name="max-stop"
+          class="input mono"
+          inputmode="decimal"
+          placeholder="none"
+          [ngModel]="form().maxStop"
+          (ngModelChange)="set('maxStop', $event)"
+        />
+        <span class="hint">A stop from the alert that is farther away is moved in to this. The alert cannot change it.</span>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="field">
+        <label for="breakeven">Breakeven</label>
+        <select
+          id="breakeven"
+          name="breakeven"
+          class="input"
+          [ngModel]="form().breakevenAfter"
+          (ngModelChange)="set('breakevenAfter', $event)"
+        >
+          <option value="">Off</option>
+          @for (t of triggers(); track t.number) {
+            <option [value]="'' + t.number">After TP {{ t.number }} (+{{ t.points }})</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="ticks" [class.muted]="!form().breakevenAfter">Ticks past the entry</label>
+        <input
+          id="ticks"
+          name="ticks"
+          class="input mono"
+          inputmode="numeric"
+          [disabled]="!form().breakevenAfter"
+          [ngModel]="form().breakevenTicks"
+          (ngModelChange)="set('breakevenTicks', $event)"
+        />
+      </div>
+    </div>
+    <span class="hint below">
+      Once price reaches that take profit, Tradovate moves the stops of the parts that go further to the entry plus
+      these ticks. It does this on its own, even while localfill is off. It reacts to the price touching the take
+      profit, so a quick spike can move the stop even if the take profit did not fill.
+    </span>
+
+    <div class="field">
+      <span class="label" id="open-label">When the account already holds the contract</span>
+      <div class="seg light" role="radiogroup" aria-labelledby="open-label">
+        <button type="button" role="radio" [attr.aria-checked]="form().ifOpen === 'reverse'" (click)="setIfOpen('reverse')">
+          Reverse
+        </button>
+        <button type="button" role="radio" [attr.aria-checked]="form().ifOpen === 'replace'" (click)="setIfOpen('replace')">
+          Replace
+        </button>
+        <button type="button" role="radio" [attr.aria-checked]="form().ifOpen === 'skip'" (click)="setIfOpen('skip')">
+          Skip
+        </button>
+      </div>
+      <span class="hint">{{ ifOpenText[form().ifOpen] }}</span>
+    </div>
+
+    @if (preview(); as p) {
+      <p class="summary">
+        Each account gets <strong>{{ total() }}</strong> contract{{ total() === 1 ? '' : 's' }}.
+        @if (p.stop_loss === null) {
+          This preset has no backup stop, so every alert has to send one.
+        }
+      </p>
+    }
+
+    @if (error()) {
+      <p class="error-box"><strong>error</strong> {{ error() }}</p>
+    }
+
+    <div class="buttons">
+      <button type="submit" class="btn tall primary" [disabled]="saving()">
+        {{ saving() ? 'Saving…' : editing() ? 'Save changes' : 'Save preset' }}
+      </button>
+      @if (editing()) {
+        <button type="button" class="link danger" (click)="remove()">Delete</button>
+      }
+      @if (saved()) {
+        <span class="green">{{ saved() }}</span>
+      }
+    </div>
+
+    @if (alert()) {
+      <div class="field alert">
+        <div class="alert-head">
+          <span class="label">Alert message</span>
+          <button type="button" class="link" (click)="copyAlert()">{{ copied() ? 'Copied' : 'Copy' }}</button>
+        </div>
+        <pre class="mono">{{ alert() }}</pre>
+        <span class="hint">
+          To send the stop with each alert, add <span class="mono">"stop_loss": 12</span> (points) or
+          <span class="mono">"stop_price": 19950</span> (an exact price). With an exact price on a market order, also
+          send <span class="mono">"price": {{ closeTag }}</span> so the first stop is close before it moves.
+        </span>
+      </div>
+    }
+  </form>
+</div>

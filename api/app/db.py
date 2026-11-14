@@ -37,6 +37,23 @@ MIGRATIONS = [
     """
     alter table connections add column known_accounts text;
     """,
+    # bracket presets saved in the dashboard, and the tradovate order strategies localfill
+    # started (so a later plain order can find their take profits and stop)
+    """
+    create table presets (
+        name text primary key,
+        config text not null,
+        updated_at text not null
+    );
+
+    create table brackets (
+        strategy_id integer primary key,
+        connection text not null,
+        account_id integer not null,
+        contract_id integer not null,
+        created_at text not null
+    );
+    """,
 ]
 
 
