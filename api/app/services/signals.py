@@ -1,16 +1,28 @@
 import asyncio
 import json
 import logging
+import sqlite3
 import time
 from datetime import datetime, timezone
 
-from app.models import SIGNAL_STATUSES, SignalCounts, SignalRecord
+from app.models import SIGNAL_STATUSES, Signal, SignalCounts, SignalRecord
 
 logger = logging.getLogger(__name__)
+
+HALTED = "localfill is halted, nothing was sent. resume it from the dashboard first"
 
 
 def now_text():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# done, partial or failed, from what happened on the accounts
+def status_of(result):
+    if result.failed == 0 and result.succeeded > 0:
+        return "done"
+    if result.succeeded > 0:
+        return "partial"
+    return "failed"
 
 
 # takes a signal from "received" to "done": saves it, runs it, saves the result
@@ -27,6 +39,13 @@ class SignalProcessor:
         self.seen = {}
         # (symbol, connection, accounts) -> sent_at of the newest alert we accepted
         self.newest = {}
+        # true after POST /halt: buys and sells are refused until resume
+        self.halted = False
+        # ids of the buy and sell signals running right now
+        self.running = set()
+
+    async def load(self):
+        self.halted = await self.db.get_setting("halted", "0") == "1"
 
     def is_duplicate(self, signal):
         seconds = self.settings.dedupe_seconds
@@ -55,41 +74,85 @@ class SignalProcessor:
         return False
 
     # saves the signal. returns the record and whether it should be executed
-    async def receive(self, signal, source):
-        if source == "webhook" and self.is_duplicate(signal):
-            record = await self.save(signal, source, "duplicate", "same signal came in a moment ago, ignored")
+    async def receive(self, signal, source, batch_id=None):
+        if signal.client_id:
+            # sent before (a retry, or a restart of whoever sends it): the first one is the answer
+            existing = await self.by_client_id(signal.client_id)
+            if existing:
+                return existing, False
+        else:
+            if source == "webhook" and self.is_duplicate(signal):
+                record = await self.save(signal, source, "duplicate", "same signal came in a moment ago, ignored")
+                return record, False
+            if self.is_late(signal):
+                message = "a newer alert for this symbol already arrived, this late one was ignored"
+                record = await self.save(signal, source, "duplicate", message)
+                return record, False
+        if self.halted and signal.action != "flatten":
+            # saved without its client_id: it was never tried, so it can be sent again after resume
+            record = await self.save(signal, source, "error", HALTED, keep_client_id=False)
             return record, False
-        if self.is_late(signal):
-            message = "a newer alert for this symbol already arrived, this late one was ignored"
-            record = await self.save(signal, source, "duplicate", message)
-            return record, False
-        record = await self.save(signal, source, "pending")
+        try:
+            record = await self.save(signal, source, "pending", batch_id=batch_id)
+        except sqlite3.IntegrityError:
+            # the same client_id arrived twice at the same moment, the other one won
+            return await self.by_client_id(signal.client_id), False
         logger.info("signal %s from %s: %s %s x%s", record.id, source, signal.action, signal.symbol, signal.qty)
         return record, True
 
     async def execute(self, signal_id, signal):
         async with self.lock:
-            dry_run = await self.db.get_setting("dry_run", "0") == "1"
-            if dry_run:
-                return await self.finish(signal_id, "dry_run", "dry run is on, no order was sent")
-            try:
-                result = await self.dispatcher.run(signal)
-            except Exception as exc:
-                logger.exception("signal %s crashed", signal_id)
-                return await self.finish(signal_id, "error", str(exc))
+            return await self.run_now(signal_id, signal)
 
-        if result.failed == 0 and result.succeeded > 0:
-            status = "done"
-        elif result.succeeded > 0:
-            status = "partial"
-        else:
-            status = "failed"
+    # runs one signal. execute calls it holding the lock, halt and batches call it themselves
+    async def run_now(self, signal_id, signal):
+        if self.halted and signal.action != "flatten":
+            return await self.finish(signal_id, "error", HALTED)
+        dry_run = await self.db.get_setting("dry_run", "0") == "1"
+        if dry_run:
+            return await self.finish(signal_id, "dry_run", "dry run is on, no order was sent")
+        if signal.action != "flatten":
+            self.running.add(signal_id)
+        try:
+            result = await self.dispatcher.run(signal)
+        except Exception as exc:
+            logger.exception("signal %s crashed", signal_id)
+            return await self.finish(signal_id, "error", str(exc))
+        finally:
+            self.running.discard(signal_id)
 
+        status = status_of(result)
         message = "; ".join(result.warnings)
         if not message and status != "done":
             errors = [r.error for r in result.results if r.error]
             message = errors[0] if errors else None
         return await self.finish(signal_id, status, message or None, result)
+
+    # ---------- the kill switch ----------
+
+    # refuses new buys and sells (also after a restart), makes the queued ones end as "halted" and
+    # flattens every target account right away, without waiting for the queue
+    async def halt(self, source):
+        self.halted = True
+        await self.db.set_setting("halted", "1")
+        self.events.publish("settings")
+        logger.warning("halted from %s, flattening every target account", source)
+        signal = Signal(action="flatten")
+        record, _ = await self.receive(signal, source)
+        return await self.run_now(record.id, signal)
+
+    # once the signal that was running when halt came in is over, flatten again in case it opened something
+    async def flatten_after_queue(self, source):
+        async with self.lock:
+            signal = Signal(action="flatten")
+            record, _ = await self.receive(signal, source)
+            return await self.run_now(record.id, signal)
+
+    async def resume(self):
+        self.halted = False
+        await self.db.set_setting("halted", "0")
+        self.events.publish("settings")
+        logger.info("resumed")
 
     # signals that were still running when localfill stopped (crash, power cut). we can not
     # know if their orders went out, so they are marked as errors instead of staying pending
@@ -99,13 +162,15 @@ class SignalProcessor:
             await self.finish(row["id"], "error", "localfill stopped while this signal was running, check the accounts")
         if rows:
             logger.warning("%d signal(s) were still running at the last shutdown, marked as errors", len(rows))
+        await self.db.execute("update batches set status = 'error' where status = 'pending'")
 
     # ---------- database ----------
 
-    async def save(self, signal, source, status, message=None):
+    async def save(self, signal, source, status, message=None, batch_id=None, keep_client_id=True):
         signal_id = await self.db.execute(
-            "insert into signals (received_at, source, payload, status, message) values (?, ?, ?, ?, ?)",
-            (now_text(), source, signal.model_dump_json(), status, message),
+            "insert into signals (received_at, source, payload, status, message, client_id, batch_id) values (?, ?, ?, ?, ?, ?, ?)",
+            (now_text(), source, signal.model_dump_json(), status, message,
+             signal.client_id if keep_client_id else None, batch_id),
         )
         record = await self.get(signal_id)
         self.events.publish("signal", record.model_dump())
@@ -123,6 +188,10 @@ class SignalProcessor:
 
     async def get(self, signal_id):
         row = await self.db.fetch_one("select * from signals where id = ?", (signal_id,))
+        return self.to_record(row) if row else None
+
+    async def by_client_id(self, client_id):
+        row = await self.db.fetch_one("select * from signals where client_id = ?", (client_id,))
         return self.to_record(row) if row else None
 
     # newest first. status is optional, for the tabs in the dashboard
@@ -150,4 +219,6 @@ class SignalProcessor:
             status=row["status"],
             message=row["message"],
             result=json.loads(row["result"]) if row["result"] else None,
+            client_id=row.get("client_id"),
+            batch_id=row.get("batch_id"),
         )

@@ -9,7 +9,11 @@ export type IfOpen = 'reverse' | 'replace' | 'skip';
 // pending = received and running, done = every account worked, partial = some failed,
 // failed = nothing worked, dry_run = dry run was on, duplicate = ignored,
 // error = something broke before any order was sent (for example an unknown symbol)
-export type SignalStatus = 'pending' | 'done' | 'partial' | 'failed' | 'dry_run' | 'duplicate' | 'error';
+export type SignalStatus =
+  'pending' | 'done' | 'partial' | 'failed' | 'dry_run' | 'duplicate' | 'error';
+
+// where a signal came from. api = a program with an api token, schedule = the daily flatten
+export type SignalSource = 'webhook' | 'dashboard' | 'api' | 'schedule';
 
 // ---------- auth ----------
 
@@ -36,6 +40,8 @@ export interface Signal {
   sent_at?: string | null;
   // only these account names or ids, out of the target accounts
   accounts?: string[] | null;
+  // sending the same client_id again returns the first signal and sends nothing
+  client_id?: string | null;
   // brackets: any of these makes it an entry with take profits and a stop
   preset?: string | null;
   take_profits?: TakeProfit[] | null;
@@ -87,6 +93,8 @@ export interface AccountResult {
   response: Record<string, unknown> | null;
   // the tradovate order strategy holding the take profits and stop
   strategy_id: number | null;
+  // flatten only: the position tradovate shows after closing (0 = flat)
+  net_pos: number | null;
 }
 
 export interface SignalResult {
@@ -108,12 +116,31 @@ export interface SignalResult {
 export interface SignalRecord {
   id: number;
   received_at: string;
-  source: 'webhook' | 'dashboard';
+  source: SignalSource;
   // the signal as we received it (cleaned up). partial because old rows can miss newer fields
   payload: Partial<Signal>;
   status: SignalStatus;
   message: string | null;
   result: SignalResult | null;
+  client_id: string | null;
+  // the batch it was sent in
+  batch_id: number | null;
+}
+
+// ---------- batches ----------
+
+// what you send to POST /api/batches. every order needs accounts
+export interface BatchBody {
+  client_id?: string | null;
+  orders: Signal[];
+}
+
+export interface BatchRecord {
+  batch_id: number;
+  client_id: string | null;
+  status: string;
+  received_at: string;
+  orders: SignalRecord[];
 }
 
 // how many signals are in each state, for the tabs above the history table
@@ -147,6 +174,12 @@ export interface AccountInfo {
   name: string;
   active: boolean;
   is_target: boolean;
+  // never traded or flattened, whatever the targets say
+  blocked: boolean;
+  // showed up after the targets were last chosen, and is not a target
+  is_new: boolean;
+  // the account's own size limits per product, empty when it uses the server's
+  max_contracts: Record<string, number>;
 }
 
 export interface ConnectionHealth {
@@ -158,6 +191,8 @@ export interface ConnectionHealth {
   token_expires_at: string | null;
   seconds_to_expiry: number | null;
   accounts: AccountInfo[];
+  // every blocked name or id, also of accounts that are not loaded right now
+  blocked_accounts: string[];
   last_error: string | null;
 }
 
@@ -198,6 +233,74 @@ export interface PnlResponse {
   accounts: AccountPnl[];
 }
 
+// ---------- fills, balances and risk ----------
+
+export type FillRole =
+  'entry' | 'take_profit' | 'stop' | 'flatten' | 'plain' | 'liquidation' | 'other';
+
+export interface FillRecord {
+  // localfill's own number, always growing
+  seq: number;
+  fill_id: number;
+  connection: string;
+  account_id: number;
+  account_name: string;
+  contract: string;
+  action: 'buy' | 'sell';
+  qty: number;
+  price: number;
+  order_id: number | null;
+  strategy_id: number | null;
+  role: FillRole;
+  ts: string | null;
+  trade_date: string | null;
+  seen_at: string;
+  // already there the first time localfill looked
+  imported: boolean;
+  fee: number | null;
+}
+
+// the firm's lock on an account, like the daily loss limit
+export interface AccountRisk {
+  locked: boolean;
+  reason: string | null;
+  admin_action: string | null;
+  liquidate_only: string | null;
+  user_triggered_liq_only: boolean | null;
+}
+
+export interface AccountState {
+  connection: string;
+  account_id: number;
+  name: string;
+  active: boolean;
+  is_target: boolean;
+  cash_balance: number | null;
+  realized_pnl_today: number | null;
+  open_pnl: number | null;
+  net_liq: number | null;
+  trade_date: string | null;
+  fees_today: number | null;
+  positions: { contract: string; net_pos: number }[];
+  working_orders: number;
+  risk: AccountRisk;
+  error: string | null;
+}
+
+// ---------- api tokens ----------
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+// the only time the token itself is shown
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
 // ---------- settings and status ----------
 
 export interface Settings {
@@ -206,6 +309,18 @@ export interface Settings {
   webhook_path: string;
   // null unless LOCALFILL_PUBLIC_URL is set
   webhook_url: string | null;
+  // the size limits: one for every product, and the ones for single products
+  max_contracts: number;
+  max_contracts_per_symbol: Record<string, number>;
+  // new york time of the daily flatten, null when it is off
+  daily_flatten_et: string | null;
+}
+
+export interface ConnectionStatus {
+  label: string;
+  online: boolean;
+  last_fill_poll: string | null;
+  last_error: string | null;
 }
 
 export interface Status {
@@ -213,6 +328,32 @@ export interface Status {
   dry_run: boolean;
   connections_total: number;
   connections_online: number;
+  // true after a halt, until resume
+  halted: boolean;
+  connections: ConnectionStatus[];
+}
+
+export interface HaltResponse {
+  halted: boolean;
+  flatten: SignalRecord | null;
+}
+
+// a change to one account, from the "accounts" event
+export interface AccountChange {
+  connection: string;
+  account_id: number;
+  name: string;
+  active: boolean;
+  change: 'new' | 'closed' | 'locked' | 'unlocked';
+  reason?: string | null;
+}
+
+export interface PositionChange {
+  connection: string;
+  account_id: number;
+  account_name: string;
+  contract: string;
+  net_pos: number;
 }
 
 // ---------- live events (GET /api/events) ----------
@@ -221,4 +362,7 @@ export type SseEvent =
   | { type: 'signal'; data: SignalRecord }
   | { type: 'connections'; data: null }
   | { type: 'settings'; data: null }
-  | { type: 'presets'; data: null };
+  | { type: 'presets'; data: null }
+  | { type: 'fill'; data: FillRecord }
+  | { type: 'position'; data: PositionChange }
+  | { type: 'accounts'; data: AccountChange };

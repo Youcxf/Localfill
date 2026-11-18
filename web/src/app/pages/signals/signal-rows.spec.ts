@@ -15,6 +15,7 @@ function account(changes: Partial<AccountResult> = {}): AccountResult {
     error: null,
     response: { orderId: 88214 },
     strategy_id: null,
+    net_pos: null,
     ...changes,
   };
 }
@@ -45,6 +46,8 @@ function record(changes: Partial<SignalRecord> = {}): SignalRecord {
     status: 'done',
     message: null,
     result: result([account(), account({ account_id: 1002, account_name: 'DEMO1002' })]),
+    client_id: null,
+    batch_id: null,
     ...changes,
   };
 }
@@ -76,6 +79,13 @@ describe('signal rows', () => {
 
     expect(describeSignal(pending)).toBe('2 MNQ · bracket');
     expect(toDetail(pending).request.find((r) => r.k === 'bracket')?.v).toBe('stop at 20,100.00');
+
+    // refused before it ran (halted, over a limit): the take profits still show
+    const refused = record({
+      payload: { action: 'buy', symbol: 'MNQ', qty: 1, take_profits: [{ qty: 1, points: 4 }], stop_loss: 4 },
+      result: null,
+    });
+    expect(toDetail(refused).request.find((r) => r.k === 'bracket')?.v).toBe('1 at +4, stop 4');
   });
 
   it('describes a flatten by its symbol, or as all positions', () => {

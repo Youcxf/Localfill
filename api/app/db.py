@@ -54,6 +54,71 @@ MIGRATIONS = [
         created_at text not null
     );
     """,
+    # accounts that are never traded or flattened, whatever the targets say
+    """
+    alter table connections add column blocked_accounts text;
+    """,
+    # an id chosen by the sender, so a retried signal is never sent twice
+    """
+    alter table signals add column client_id text;
+    create unique index signals_client_id on signals(client_id) where client_id is not null;
+    """,
+    # tokens for programs, only a hash of each is kept
+    """
+    create table api_tokens (
+        id integer primary key autoincrement,
+        name text not null,
+        token_hash text not null unique,
+        created_at text not null,
+        last_used_at text
+    );
+    """,
+    # several orders sent together, each one is still its own signal
+    """
+    create table batches (
+        id integer primary key autoincrement,
+        client_id text unique,
+        received_at text not null,
+        status text not null
+    );
+
+    alter table signals add column batch_id integer;
+    """,
+    # every fill tradovate reports, and the orders localfill placed (to tell what each fill was)
+    """
+    create table fills (
+        seq integer primary key autoincrement,
+        fill_id integer not null unique,
+        connection text not null,
+        account_id integer not null,
+        account_name text not null,
+        contract text not null,
+        action text not null,
+        qty real not null,
+        price real not null,
+        order_id integer,
+        strategy_id integer,
+        role text not null,
+        ts text,
+        trade_date text,
+        seen_at text not null,
+        imported integer not null default 0,
+        fee real
+    );
+
+    create table orders (
+        order_id integer primary key,
+        connection text not null,
+        account_id integer not null,
+        strategy_id integer,
+        role text not null,
+        created_at text not null
+    );
+    """,
+    # the most contracts each account may hold per product, set in the dashboard
+    """
+    alter table connections add column account_limits text;
+    """,
 ]
 
 

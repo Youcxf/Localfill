@@ -74,14 +74,14 @@ A few habits that keep it easy to follow:
 | screen | what it shows | endpoints |
 |--------|---------------|-----------|
 | Setup, Login | choose or enter the password | `GET /auth/status`, `POST /auth/setup`, `POST /auth/login` |
-| Top bar and sidebar | how many connections are online, a **Dry run** bar with a button to turn it off, whether live updates are connected, logout | `GET /status`, `POST /auth/logout`, events `settings` |
+| Top bar and sidebar | how many connections are online, a **Dry run** bar with a button to turn it off, the **Halt** button and a red bar with **Resume** while halted, whether live updates are connected, logout | `GET /status`, `POST /halt`, `POST /resume`, `POST /auth/logout`, events `settings` |
 | Signals | the history with a tab and a count per status. Click a row for the per-account results, fill prices, errors and Tradovate's raw answer | `GET /signals`, `GET /signals/counts`, events `signal` |
-| Connections | list of logins with their accounts. Add, remove, reconnect, and tick which accounts receive orders | `GET /connections`, `POST /connections`, `PATCH /connections/{label}`, `POST /connections/{label}/reconnect`, `DELETE /connections/{label}` |
+| Connections | list of logins with their accounts. Add, remove, reconnect, refresh the accounts, tick which accounts receive orders, block an account (its box can't be ticked), give an account its own size limits. New accounts are marked "new" | `GET /connections`, `POST /connections`, `PATCH /connections/{label}`, `POST /connections/{label}/reconnect`, `POST /connections/{label}/refresh`, `PUT /connections/{label}/blocked`, `PUT /connections/{label}/limits`, `DELETE /connections/{label}`, events `connections`, `accounts` |
 | Positions | open positions grouped by contract, a notice when you are in two contract months, and flatten per contract or for everything | `GET /positions`, `POST /flatten` |
 | P/L | realized P/L of the day in one big figure, per account, and the round trips of the account you pick | `GET /pnl` |
 | Manual order | buy, sell or flatten from the dashboard, optionally with a bracket preset or a stop, and the result per account | `POST /signals`, `GET /presets` |
 | Brackets | the saved bracket presets: take profits per part, backup and max stop, breakeven, what to do when an account is already in a position, and the alert message that uses it | `GET /presets`, `PUT /presets/{name}`, `DELETE /presets/{name}`, events `presets` |
-| Settings | dry run, the webhook URL (hidden until you reveal it), regenerate it, ready made TradingView messages | `GET /settings`, `PATCH /settings`, `POST /settings/webhook-token/regenerate` |
+| Settings | dry run, the webhook URL (hidden until you reveal it), regenerate it, API tokens for programs (the token is shown once), the server's size limits and daily flatten, ready made TradingView messages | `GET /settings`, `PATCH /settings`, `POST /settings/webhook-token/regenerate`, `GET /tokens`, `POST /tokens`, `DELETE /tokens/{id}` |
 
 ## Log in and log out
 
@@ -103,7 +103,8 @@ The app does not poll. After login the top bar, the Signals page and the Connect
 |-------|--------------|
 | `signal` | adds the signal to the top of the history, or replaces the row with the same `id` |
 | `connections` | loads the connections again |
-| `settings` | loads the settings again (dry run or the token changed) |
+| `settings` | loads the settings again (dry run, the token or halt changed) |
+| `accounts` | the Connections page loads the connections again (an account is new, closed, locked or unlocked) |
 
 A signal event arrives twice for a normal alert: first with `status: "pending"`, then with the final status once Tradovate has answered. That is why the table replaces a row instead of adding a second one. The stream reconnects by itself, and the top bar says "Reconnecting…" while it is down. Details are in [api.md](api.md#live-events).
 

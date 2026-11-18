@@ -1,7 +1,12 @@
-<header [class.dry]="dry()">
+<header [class.dry]="dry() && !halted()" [class.halted]="halted()">
   <h1>{{ title() }}</h1>
 
-  @if (dry()) {
+  @if (halted()) {
+    <div class="note">
+      <strong class="mono">Halted</strong>
+      <span>Target accounts were flattened, buys and sells are refused</span>
+    </div>
+  } @else if (dry()) {
     <div class="note">
       <strong class="mono">Dry run</strong>
       <span>Alerts are logged, no orders are sent</span>
@@ -10,8 +15,15 @@
 
   <div class="grow"></div>
 
-  @if (dry()) {
-    <button type="button" class="off" (click)="turnOffDryRun()">Turn off dry run</button>
+  @if (halted()) {
+    <button type="button" class="off" (click)="resume()">Resume</button>
+  } @else {
+    @if (dry()) {
+      <button type="button" class="off" (click)="turnOffDryRun()">Turn off dry run</button>
+    }
+    <button type="button" class="halt" [disabled]="halting()" (click)="halt()">
+      {{ halting() ? 'Halting…' : 'Halt' }}
+    </button>
   }
 
   <div class="live">

@@ -108,3 +108,34 @@ pre {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* api tokens: one ruled line each */
+.tokens {
+  border-top: 1px solid var(--rule-soft);
+}
+
+.token {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 210px 60px;
+  column-gap: 12px;
+  align-items: center;
+  height: 36px;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 12px;
+}
+
+.token .link {
+  justify-self: end;
+}
+
+.created {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.limits p {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  font-size: 13px;
+}

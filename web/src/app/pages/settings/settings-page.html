@@ -8,12 +8,27 @@
       <div class="about">
         <h2>Dry run</h2>
         <p class="muted">
-          When on, alerts are received and logged but no order is sent. Use it to test your TradingView alerts.
+          When on, alerts are received and logged but no order is sent. Use it to test your
+          TradingView alerts.
         </p>
       </div>
       <div class="seg light" role="radiogroup" aria-label="Dry run">
-        <button type="button" role="radio" [attr.aria-checked]="!s.dry_run" (click)="setDryRun(false)">Off</button>
-        <button type="button" role="radio" [attr.aria-checked]="s.dry_run" (click)="setDryRun(true)">On</button>
+        <button
+          type="button"
+          role="radio"
+          [attr.aria-checked]="!s.dry_run"
+          (click)="setDryRun(false)"
+        >
+          Off
+        </button>
+        <button
+          type="button"
+          role="radio"
+          [attr.aria-checked]="s.dry_run"
+          (click)="setDryRun(true)"
+        >
+          On
+        </button>
       </div>
     </section>
 
@@ -21,8 +36,8 @@
       <div class="about">
         <h2>Webhook URL</h2>
         <p class="muted">
-          Paste this into the alert's Webhook URL field in TradingView. Treat it like a password: TradingView
-          cannot send headers, so the token is part of the address.
+          Paste this into the alert's Webhook URL field in TradingView. Treat it like a password:
+          TradingView cannot send headers, so the token is part of the address.
         </p>
       </div>
       <div class="control">
@@ -37,17 +52,106 @@
         </div>
         @if (!s.webhook_url) {
           <p class="hint">
-            Set <span class="mono">LOCALFILL_PUBLIC_URL</span> to your tunnel address and the full URL shows up
-            here.
+            Set <span class="mono">LOCALFILL_PUBLIC_URL</span> to your tunnel address and the full
+            URL shows up here.
           </p>
         }
         <div class="regenerate">
           <p class="muted">
-            Need a new address? The old one stops working immediately, so every TradingView alert that uses it
-            has to be updated.
+            Need a new address? The old one stops working immediately, so every TradingView alert
+            that uses it has to be updated.
           </p>
-          <button type="button" class="btn outline-danger" (click)="regenerate()">Regenerate URL</button>
+          <button type="button" class="btn outline-danger" (click)="regenerate()">
+            Regenerate URL
+          </button>
         </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="about">
+        <h2>API tokens</h2>
+        <p class="muted">
+          For programs, like a trading bot, that use the dashboard API. Send it as
+          <span class="mono">Authorization: Bearer &lt;token&gt;</span>. A token can trade and read,
+          but it can not block accounts, change size limits, add connections, resume after a halt or
+          change these settings.
+        </p>
+      </div>
+      <div class="control">
+        @if (created(); as c) {
+          <div class="created">
+            <p>
+              Copy the token for <strong>{{ c.name }}</strong> now, it is not shown again.
+            </p>
+            <div class="url">
+              <input class="input mono" readonly aria-label="New API token" [value]="c.token" />
+              <button type="button" class="btn tall primary" (click)="copy(c.token, 'token')">
+                {{ copied() === 'token' ? 'Copied' : 'Copy' }}
+              </button>
+            </div>
+          </div>
+        }
+        @if (tokens().length) {
+          <div class="tokens">
+            @for (token of tokens(); track token.id) {
+              <div class="token">
+                <span class="name">{{ token.name }}</span>
+                <span class="muted">made {{ token.created_at.slice(0, 10) }}</span>
+                <span class="muted">{{
+                  token.last_used_at ? 'used ' + utcDateTime(token.last_used_at) : 'never used'
+                }}</span>
+                <button
+                  type="button"
+                  class="link danger"
+                  [attr.aria-label]="'Revoke ' + token.name"
+                  (click)="revokeToken(token)"
+                >
+                  Revoke
+                </button>
+              </div>
+            }
+          </div>
+        }
+        <form class="url" (submit)="$event.preventDefault(); createToken()">
+          <input
+            class="input"
+            placeholder="Name, like trading bot"
+            aria-label="Name of the new token"
+            maxlength="50"
+            [value]="tokenName()"
+            (input)="tokenName.set($any($event.target).value)"
+          />
+          <button type="submit" class="btn tall outline">Create token</button>
+        </form>
+      </div>
+    </section>
+
+    <section>
+      <div class="about">
+        <h2>Order limits</h2>
+        <p class="muted">
+          The most contracts one signal may ask for per account. Set them on the server with
+          <span class="mono">LOCALFILL_MAX_CONTRACTS</span> and
+          <span class="mono">LOCALFILL_MAX_CONTRACTS_PER_SYMBOL</span>, an account's own limits are
+          on the Connections page.
+        </p>
+      </div>
+      <div class="control limits">
+        <p>
+          <span class="muted">Every product</span>
+          <span class="mono">{{ s.max_contracts || 'no limit' }}</span>
+        </p>
+        <p>
+          <span class="muted">Single products</span>
+          <span class="mono">{{ symbolLimits() || 'none' }}</span>
+        </p>
+        <p>
+          <span class="muted">Daily flatten</span>
+          <span class="mono">{{
+            s.daily_flatten_et ? s.daily_flatten_et + ' New York, Mon to Fri' : 'off'
+          }}</span>
+        </p>
       </div>
     </section>
 

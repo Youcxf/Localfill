@@ -35,6 +35,7 @@ def make_settings(tmp_path, server):
         # the tests that need it turn it on themselves
         reconnect_seconds=0,
         account_refresh_seconds=0,
+        fill_poll_seconds=0,
         static_dir=str(tmp_path / "no-frontend"),
     )
 
@@ -72,6 +73,16 @@ async def connected(admin):
     response = await admin.post("/api/connections", json={"label": "A", "username": "someone", "password": "secret123"})
     assert response.status_code == 201, response.text
     return admin
+
+
+# a client for programs: no session cookie, only the api token
+@pytest.fixture
+async def bot(ctx, admin):
+    token = (await admin.post("/api/tokens", json={"name": "bot"})).json()["token"]
+    transport = httpx.ASGITransport(app=create_admin_app(ctx))
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", headers=headers) as client:
+        yield client
 
 
 # waits until the signals running in the background are done

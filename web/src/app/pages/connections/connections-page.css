@@ -48,9 +48,14 @@ h2 {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding-top: 4px;
+}
+
+.actions .link {
+  white-space: nowrap;
 }
 
 .detail {
@@ -67,7 +72,7 @@ h2 {
 
 .row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 120px 130px;
+  grid-template-columns: 20px minmax(0, 1fr) 90px 150px 130px 110px;
   column-gap: 12px;
   align-items: center;
   height: 36px;
@@ -87,6 +92,30 @@ h2 {
   font-weight: 500;
 }
 
+/* an account that showed up after the targets were chosen */
+.new {
+  margin-left: 8px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.row.blocked .name {
+  color: var(--muted);
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.limit-input {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 /* the tick box is a plain square, filled blue when the account gets orders */
 .box {
   width: 16px;
@@ -100,6 +129,19 @@ h2 {
 .box[aria-checked='true'] {
   border-color: var(--accent);
   background: var(--accent);
+}
+
+/* a blocked account can not be ticked, its box is crossed out */
+.box:disabled {
+  opacity: 1;
+  border-color: var(--rule-strong);
+  background: linear-gradient(
+    to top right,
+    transparent 46%,
+    var(--muted) 46%,
+    var(--muted) 54%,
+    transparent 54%
+  );
 }
 
 .empty {

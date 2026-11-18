@@ -1,8 +1,9 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../../api/api.service';
-import { Settings } from '../../api/types';
+import { ApiToken, ApiTokenCreated, Settings } from '../../api/types';
 import { AppState } from '../../core/app-state';
 import { errorText } from '../../core/error-text';
+import { utcDateTime } from '../../core/format';
 
 // alert messages people can paste into TradingView. the {{ }} parts are tradingview placeholders,
 // tradingview fills them in when the alert fires
@@ -38,6 +39,20 @@ export class SettingsPage {
   protected readonly copied = signal('');
   protected readonly error = signal('');
 
+  // api tokens for programs, and the one just made (its token is only shown now)
+  protected readonly tokens = signal<ApiToken[]>([]);
+  protected readonly created = signal<ApiTokenCreated | null>(null);
+  protected readonly tokenName = signal('');
+  protected readonly utcDateTime = utcDateTime;
+
+  // "MNQ 48, NQ 3", the size limits of single products
+  protected readonly symbolLimits = computed(() => {
+    const limits = this.settings()?.max_contracts_per_symbol ?? {};
+    return Object.entries(limits)
+      .map(([product, limit]) => `${product} ${limit}`)
+      .join(', ');
+  });
+
   // the address without the secret part, like "https://alerts.example.com/hook/"
   protected readonly base = computed(() => {
     const settings = this.settings();
@@ -58,6 +73,46 @@ export class SettingsPage {
 
   constructor() {
     this.api.settings().subscribe((settings) => this.settings.set(settings));
+    this.loadTokens();
+  }
+
+  protected createToken() {
+    const name = this.tokenName().trim();
+    if (!name) {
+      this.error.set('Give the token a name, like the program that will use it.');
+      return;
+    }
+    this.api.createToken(name).subscribe({
+      next: (created) => {
+        this.created.set(created);
+        this.tokenName.set('');
+        this.error.set('');
+        this.loadTokens();
+      },
+      error: (err) => this.error.set(errorText(err)),
+    });
+  }
+
+  protected revokeToken(token: ApiToken) {
+    if (!confirm(`Revoke "${token.name}"? The program using it is refused from now on.`)) {
+      return;
+    }
+    this.api.revokeToken(token.id).subscribe({
+      next: () => {
+        if (this.created()?.id === token.id) {
+          this.created.set(null);
+        }
+        this.loadTokens();
+      },
+      error: (err) => this.error.set(errorText(err)),
+    });
+  }
+
+  private loadTokens() {
+    this.api.tokens().subscribe({
+      next: (tokens) => this.tokens.set(tokens),
+      error: (err) => this.error.set(errorText(err)),
+    });
   }
 
   protected setDryRun(on: boolean) {

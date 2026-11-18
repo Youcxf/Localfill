@@ -139,6 +139,14 @@ class Brackets:
         )
         return [row["strategy_id"] for row in rows]
 
+    # every strategy localfill started on one account, newest first
+    async def on_account(self, connection, account_id):
+        rows = await self.db.fetch_all(
+            "select strategy_id from brackets where connection = ? and account_id = ? order by created_at desc",
+            (connection, account_id),
+        )
+        return [row["strategy_id"] for row in rows]
+
     # strategies tradovate is done with
     async def forget(self, strategy_ids):
         for strategy_id in strategy_ids:

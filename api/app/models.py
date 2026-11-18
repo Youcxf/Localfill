@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -15,6 +15,12 @@ class Output(BaseModel):
 # the states a signal can be in (see SignalRecord)
 SignalStatus = Literal["pending", "done", "partial", "failed", "dry_run", "duplicate", "error"]
 SIGNAL_STATUSES = ["pending", "done", "partial", "failed", "dry_run", "duplicate", "error"]
+
+# where a signal came from. api = a program with an api token, schedule = the daily flatten
+SignalSource = Literal["webhook", "dashboard", "api", "schedule"]
+
+# an id chosen by whoever sends the signal or batch. the same id is never run twice
+ClientId = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[\w.:-]+$")]
 
 
 # ---------- brackets: take profits and a stop that tradovate places with the entry ----------
@@ -93,6 +99,8 @@ class Signal(BaseModel):
     # only these account names (or ids), instead of every target account of the connection.
     # lets two strategies trade the same symbol on different accounts
     accounts: list[str] | None = None
+    # sending the same client_id again returns the first signal and sends nothing
+    client_id: ClientId | None = None
 
     # brackets. any of these turns the order into an entry with take profits and a stop,
     # the fields given here win over the ones of the preset
@@ -175,6 +183,8 @@ class AccountResult(Output):
     response: dict | None = None
     # the tradovate order strategy that holds the take profits and stop, for bracket orders
     strategy_id: int | None = None
+    # flatten only: what tradovate shows for the position after closing it (0 = flat)
+    net_pos: float | None = None
 
 
 # what happened for a whole signal (all accounts together)
@@ -198,13 +208,33 @@ class SignalResult(Output):
 class SignalRecord(Output):
     id: int
     received_at: str
-    source: Literal["webhook", "dashboard"]
+    source: SignalSource
     payload: dict
     # pending = running, done = all accounts worked, partial = some failed, failed = none worked,
     # dry_run = dry run was on, duplicate = ignored, error = broke before any order was sent
     status: SignalStatus
     message: str | None = None
     result: SignalResult | None = None
+    client_id: str | None = None
+    # the batch this signal was sent in
+    batch_id: int | None = None
+
+
+# ---------- batches: different orders on different accounts, sent together ----------
+
+class BatchBody(BaseModel):
+    client_id: ClientId | None = None
+    orders: list[Signal] = Field(min_length=1, max_length=50)
+
+
+class BatchRecord(Output):
+    batch_id: int
+    client_id: str | None = None
+    # pending, done, partial, failed, dry_run or error, worked out from its orders
+    status: str
+    received_at: str
+    # in the order they were sent
+    orders: list[SignalRecord] = Field(default_factory=list)
 
 
 # how many signals are in each state, for the tabs above the history table
@@ -237,6 +267,10 @@ class ConnectionConfig(BaseModel):
     # filled in by localfill: the account names that existed when the targets were chosen.
     # with empty target_accounts only these are traded, so a new account is never traded by surprise
     known_accounts: list[str] | None = None
+    # account names or ids that are never traded or flattened, whatever target_accounts says
+    blocked_accounts: list[str] = Field(default_factory=list)
+    # account name -> the most contracts it may trade per product, like {"NQ": 1, "MNQ": 10}
+    account_limits: dict[str, dict[str, int]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def check_api_key(self):
@@ -249,12 +283,44 @@ class TargetsUpdate(BaseModel):
     target_accounts: list[str]
 
 
+class BlockedUpdate(BaseModel):
+    blocked_accounts: list[str]
+
+
+# one account, by name or id
+class AccountChange(BaseModel):
+    account: str = Field(min_length=1)
+
+
+class AccountLimitsUpdate(BaseModel):
+    account: str = Field(min_length=1)
+    # product -> most contracts, like {"NQ": 1, "MNQ": 10}. empty removes the account's own limits
+    max_contracts: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("max_contracts")
+    @classmethod
+    def check_limits(cls, value):
+        cleaned = {}
+        for product, limit in value.items():
+            product = product.strip().upper()
+            if not product or limit < 0:
+                raise ValueError("every limit needs a product and a number of 0 or more")
+            cleaned[product] = limit
+        return cleaned
+
+
 class AccountInfo(Output):
     id: int
     name: str
     active: bool
     # true if orders are sent to this account (see target_accounts)
     is_target: bool
+    # true if it is never traded or flattened (see blocked_accounts)
+    blocked: bool = False
+    # showed up after the targets were last chosen, and is not a target
+    is_new: bool = False
+    # the account's own size limits per product, empty when it uses the server's
+    max_contracts: dict[str, int] = Field(default_factory=dict)
 
 
 class ConnectionHealth(Output):
@@ -266,6 +332,8 @@ class ConnectionHealth(Output):
     token_expires_at: str | None = None
     seconds_to_expiry: float | None = None
     accounts: list[AccountInfo] = Field(default_factory=list)
+    # every blocked name or id, also of accounts that are not loaded right now
+    blocked_accounts: list[str] = Field(default_factory=list)
     last_error: str | None = None
 
 
@@ -307,6 +375,81 @@ class PnlResponse(Output):
     accounts: list[AccountPnl] = Field(default_factory=list)
 
 
+# ---------- fills, balances and risk ----------
+
+# what a fill was: entry, take_profit or stop of a bracket localfill started, flatten, plain
+# (a plain localfill order), liquidation (the firm's risk system) or other (placed outside localfill)
+FillRole = Literal["entry", "take_profit", "stop", "flatten", "plain", "liquidation", "other"]
+
+
+class FillRecord(Output):
+    # localfill's own number, always growing. read on from the last one you handled
+    seq: int
+    # tradovate's id of the fill
+    fill_id: int
+    connection: str
+    account_id: int
+    account_name: str
+    contract: str
+    action: Literal["buy", "sell"]
+    qty: float
+    price: float
+    order_id: int | None = None
+    strategy_id: int | None = None
+    role: FillRole
+    # tradovate's time of the fill, and when localfill saw it
+    ts: str | None = None
+    trade_date: str | None = None
+    seen_at: str
+    # true for fills that already existed the first time localfill looked (they are not new)
+    imported: bool = False
+    # every fee tradovate charged for this fill, when it gives them
+    fee: float | None = None
+
+
+# the firm's lock on an account, like the daily loss limit
+class AccountRisk(Output):
+    # true when tradovate will refuse new orders (liquidate only, trading disabled)
+    locked: bool = False
+    reason: str | None = None
+    # tradovate's own fields, as it sent them
+    admin_action: str | None = None
+    liquidate_only: str | None = None
+    user_triggered_liq_only: bool | None = None
+
+
+class AccountPosition(Output):
+    contract: str
+    net_pos: float
+
+
+class AccountState(Output):
+    connection: str
+    account_id: int
+    name: str
+    active: bool
+    is_target: bool
+    cash_balance: float | None = None
+    realized_pnl_today: float | None = None
+    open_pnl: float | None = None
+    net_liq: float | None = None
+    trade_date: str | None = None
+    # the fees of today's fills localfill has seen
+    fees_today: float | None = None
+    positions: list[AccountPosition] = Field(default_factory=list)
+    # orders that can still fill
+    working_orders: int = 0
+    risk: AccountRisk = Field(default_factory=AccountRisk)
+    # what could not be read, if anything
+    error: str | None = None
+
+
+class FrontContract(Output):
+    symbol: str
+    name: str
+    id: int
+
+
 # ---------- auth, settings, status ----------
 
 class SetupBody(BaseModel):
@@ -329,10 +472,24 @@ class SettingsResponse(Output):
     webhook_path: str
     # only filled in if LOCALFILL_PUBLIC_URL is set
     webhook_url: str | None = None
+    # the size limits: one for every product, and the ones for single products
+    max_contracts: int = 0
+    max_contracts_per_symbol: dict[str, int] = Field(default_factory=dict)
+    # the new york time of the daily flatten, null when it is off
+    daily_flatten_et: str | None = None
 
 
 class SettingsUpdate(BaseModel):
     dry_run: bool | None = None
+
+
+# one connection, for programs that check localfill before trading
+class ConnectionStatus(Output):
+    label: str
+    online: bool
+    # the last time new fills were read without an error, null if never
+    last_fill_poll: str | None = None
+    last_error: str | None = None
 
 
 class StatusResponse(Output):
@@ -340,6 +497,33 @@ class StatusResponse(Output):
     dry_run: bool
     connections_total: int
     connections_online: int
+    # true after POST /halt, until POST /resume
+    halted: bool = False
+    connections: list[ConnectionStatus] = Field(default_factory=list)
+
+
+class HaltResponse(Output):
+    halted: bool
+    # the flatten halt ran on every target account
+    flatten: SignalRecord | None = None
+
+
+# ---------- api tokens ----------
+
+class TokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+
+
+class ApiToken(Output):
+    id: int
+    name: str
+    created_at: str
+    last_used_at: str | None = None
+
+
+# the only time the token itself is shown
+class ApiTokenCreated(ApiToken):
+    token: str
 
 
 class FlattenBody(BaseModel):

@@ -65,7 +65,7 @@ Tell localfill your public address by setting `LOCALFILL_PUBLIC_URL` in `.env` (
 curl https://your-address/health
 ```
 
-You should get `{"status":"ok","version":"1.3.0"}`. That proves the whole path works. Now turn on dry run (`PATCH /api/settings` with `{ "dry_run": true }`) and send a test alert:
+You should get `{"status":"ok","version":"1.4.0"}`. That proves the whole path works. Now turn on dry run (`PATCH /api/settings` with `{ "dry_run": true }`) and send a test alert:
 
 ```bash
 curl -X POST https://your-address/hook/YOUR_TOKEN \
@@ -77,7 +77,7 @@ The answer is `{"signal_id": 1, "status": "pending"}` and the signal shows up in
 
 ## In TradingView
 
-In the alert dialog, under Notifications, tick "Webhook URL" and paste `https://your-address/hook/YOUR_TOKEN`. Put the order in the message box. Examples are in the [README](../README.md#in-tradingview).
+In the alert dialog, under Notifications, tick "Webhook URL" and paste `https://your-address/hook/YOUR_TOKEN`. Put the order in the message box. Examples are in the [README](../README.md#sending-tradingview-alerts).
 
 ## If nothing happens
 

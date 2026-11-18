@@ -80,7 +80,10 @@ async def test_an_alert_can_not_reach_an_account_that_is_not_a_target(ctx, conne
 
     result = await ctx.dispatcher.run(Signal(action="buy", symbol="MNQ", accounts=["DEMO1002"]))
 
-    assert result.total == 0
+    # nothing is sent, and the answer says why instead of staying silent
+    assert result.succeeded == 0
+    assert [r.error for r in result.results] == ["account DEMO1002 is not a target"]
+    assert ctx.broker.order_requests == []
 
 
 # ---------- duplicates ----------

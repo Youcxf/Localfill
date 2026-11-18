@@ -71,6 +71,8 @@ class TradovateConnection:
         self.relogins = []
         # set after login when tradovate says this user lives on another host
         self.api_url = None
+        # called with a list of changes when an account shows up or closes (the manager sets it)
+        self.on_accounts_changed = None
 
     @property
     def label(self):
@@ -251,6 +253,7 @@ class TradovateConnection:
             ids[str(account_id)] = account_id
             # closed accounts (blown evaluations...) can not trade anymore
             active[account_id] = account.get("active", True) and not account.get("closed", False)
+        old_names, old_active = self.account_names, self.account_active
         self.account_names, self.account_ids, self.account_active = names, ids, active
 
         known = self.config.known_accounts
@@ -260,14 +263,56 @@ class TradovateConnection:
                     logger.warning("[%s] new account %s found, it gets no orders until you select it", self.label, name)
         logger.info("[%s] found %d accounts", self.label, len(names))
 
-    # the account ids that should receive orders
+        # the first load after a login is not a change
+        if old_names and self.on_accounts_changed:
+            changes = self.account_changes(old_names, old_active)
+            if changes:
+                self.on_accounts_changed(self, changes)
+
+    # accounts that showed up, and accounts that closed or disappeared, since the last load
+    def account_changes(self, old_names, old_active):
+        changes = []
+        for account_id, name in self.account_names.items():
+            is_active = self.account_active[account_id]
+            if account_id not in old_names:
+                changes.append(self.change(account_id, name, is_active, "new"))
+            elif old_active.get(account_id, True) and not is_active:
+                changes.append(self.change(account_id, name, False, "closed"))
+        for account_id, name in old_names.items():
+            if account_id not in self.account_names and old_active.get(account_id, True):
+                changes.append(self.change(account_id, name, False, "closed"))
+        return changes
+
+    def change(self, account_id, name, is_active, what):
+        return {"connection": self.label, "account_id": account_id, "name": name, "active": is_active, "change": what}
+
+    # the ids of the accounts that are never traded or flattened
+    def blocked_ids(self):
+        found = set()
+        for key in self.config.blocked_accounts:
+            account_id = self.account_ids.get(key)
+            if account_id is not None:
+                found.add(account_id)
+        return found
+
+    def is_blocked(self, account_id):
+        return account_id in self.blocked_ids()
+
+    # the account's own size limit for one product (like lucid's scaling plan), None if it has none
+    def account_limit(self, account_id, product):
+        name = self.account_names.get(account_id)
+        limits = self.config.account_limits.get(name) or self.config.account_limits.get(str(account_id)) or {}
+        return limits.get(product)
+
+    # the account ids that should receive orders. a blocked account is never one of them
     def target_account_ids(self):
+        blocked = self.blocked_ids()
         if not self.config.target_accounts:
             # nothing picked: every active account that existed when that was chosen
             known = self.config.known_accounts
             return [
                 i for i, ok in self.account_active.items()
-                if ok and (known is None or self.account_names[i] in known)
+                if ok and (known is None or self.account_names[i] in known) and i not in blocked
             ]
         found = []
         for key in self.config.target_accounts:
@@ -275,10 +320,14 @@ class TradovateConnection:
             if account_id is None:
                 logger.warning("[%s] target account '%s' not found", self.label, key)
                 continue
+            if account_id in blocked:
+                logger.warning("[%s] target account '%s' is blocked, skipped", self.label, key)
+                continue
             if not self.account_active.get(account_id, True):
                 logger.warning("[%s] target account '%s' is closed or inactive, skipped", self.label, key)
                 continue
-            found.append(account_id)
+            if account_id not in found:
+                found.append(account_id)
         return found
 
     # ---------- http ----------
@@ -395,10 +444,20 @@ class TradovateConnection:
         if self.expires_at:
             seconds_left = (self.expires_at - datetime.now(timezone.utc)).total_seconds()
         targets = set(self.target_account_ids())
-        accounts = [
-            AccountInfo(id=i, name=name, active=self.account_active.get(i, True), is_target=i in targets)
-            for i, name in self.account_names.items()
-        ]
+        blocked = self.blocked_ids()
+        known = self.config.known_accounts
+        accounts = []
+        for i, name in self.account_names.items():
+            limits = self.config.account_limits.get(name) or self.config.account_limits.get(str(i)) or {}
+            accounts.append(AccountInfo(
+                id=i,
+                name=name,
+                active=self.account_active.get(i, True),
+                is_target=i in targets,
+                blocked=i in blocked,
+                is_new=known is not None and name not in known and i not in targets and i not in blocked,
+                max_contracts=limits,
+            ))
         return ConnectionHealth(
             label=self.label,
             demo=self.config.demo,
@@ -408,5 +467,6 @@ class TradovateConnection:
             token_expires_at=self.expires_at.isoformat() if self.expires_at else None,
             seconds_to_expiry=seconds_left,
             accounts=accounts,
+            blocked_accounts=list(self.config.blocked_accounts),
             last_error=self.last_error,
         )

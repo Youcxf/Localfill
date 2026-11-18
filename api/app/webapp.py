@@ -6,7 +6,7 @@ from starlette.exceptions import HTTPException
 from starlette.staticfiles import StaticFiles
 
 from app import __version__
-from app.routes import auth, connections, events, ingress, presets, system, trading
+from app.routes import auth, connections, events, ingress, presets, system, tokens, trading
 
 
 # serves the built angular app. for a url that is not a file (like /connections)
@@ -36,12 +36,16 @@ def create_admin_app(ctx):
     app = FastAPI(
         title="localfill admin api",
         version=__version__,
-        description="the api behind the localfill dashboard. log in with /api/auth/login first.",
+        description=(
+            "the api behind the localfill dashboard. log in with /api/auth/login first, "
+            'or send an api token as "Authorization: Bearer <token>".'
+        ),
         docs_url=None,
     )
     app.state.ctx = ctx
 
-    for router in (auth.router, system.router, connections.router, presets.router, trading.router, events.router):
+    routers = (auth.router, system.router, tokens.router, connections.router, presets.router, trading.router, events.router)
+    for router in routers:
         app.include_router(router, prefix="/api")
 
     # the docs page is ours, so its browser tab shows the localfill icon (served with the dashboard files)

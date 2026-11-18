@@ -26,15 +26,18 @@ A self-hosted trade copier and webhook automation server for **Tradovate**. Auto
 
 A free, private alternative to **PickMyTrade, TradersPost, Tradesyncer, or Replikanto** credentials and encryption keys stay strictly on your local machine. Works seamlessly with prop firm accounts (Apex Trader Funding, Topstep, etc.) with or without a paid Tradovate API subscription.
 
-> **Current Version** : <ins>1.3.0</ins>
+> **Current Version** : <ins>1.4.0</ins>
 
 ## Features
 
 - **Copy trading:** one alert goes to every target account, on several logins at once, all sent at the same time. Choose the target accounts per login. It copies alerts, not trades you place by hand on Tradovate
 - **Position sync:** send the position you want instead of a quantity, and each account sends only what it needs to get there. Accounts that missed an alert, got a partial fill or went offline catch up on the next one
 - **Take profits and stops:** split an entry into parts with their own take profit, a stop from the alert or a backup one, and breakeven after the first take profit. Tradovate holds them, so they keep working when localfill is off. Save them as presets in the dashboard
-- Orders are never resent after an unclear answer, so a timeout can't place a double order
-- Safety limits: max contracts per alert, late alerts ignored, a second copy of localfill refuses to start
+- **Drive it from your own program:** API tokens, batches (a different order on every account at the same second), every fill with what it was (entry, take profit, stop, liquidation), real balances and the prop firm's daily loss lockout. See [docs/api.md](docs/api.md)
+- **Blocked accounts:** your own account on a prop firm login is never traded or flattened, whatever happens
+- **Kill switch:** Halt flattens every target account right away and refuses new orders until you resume. An optional daily flatten is the backup
+- Orders are never resent after an unclear answer, and a `client_id` makes sure a retried signal is never sent twice
+- Safety limits: max contracts per alert, per product and per account (a prop firm's scaling plan), late alerts ignored, a second copy of localfill refuses to start
 - New Tradovate accounts get no orders until you select them, closed accounts are skipped
 - Flatten cancels working orders too
 - Offline logins are retried every minute
@@ -154,8 +157,12 @@ Save the same thing as a preset on the **Brackets** page and the alert gets shor
 ### Accounts
 
 - With **every account** picked, only the accounts that existed when you picked it get orders. A new account added on Tradovate later (a new evaluation, say) gets nothing until you select it, or pick every account again.
-- Closed accounts (blown or archived) are skipped, even when picked by name. The account list reloads every 10 minutes.
+- Closed accounts (blown or archived) are skipped, even when picked by name. The account list reloads every 10 minutes, or right away with **Refresh accounts**.
+- **Block** the accounts you trade by hand (Connections page) before choosing targets. A blocked account is never traded or flattened, not even by a flatten of everything, and programs with an API token can't unblock it.
+- **Limit** gives one account its own size limits, like `NQ=1, MNQ=10` for a fresh funded account.
 - Two copies of localfill on the same data folder would place every order twice, so the second one refuses to start. Two copies with *different* data folders and the same Tradovate logins can't be detected, so don't run Docker and a dev server with the same logins at once.
+
+### What you can send
 
 | field | default | meaning |
 |-------|---------|---------|
@@ -168,6 +175,7 @@ Save the same thing as a preset on the **Brackets** page and the alert gets shor
 | `contract` | | exact contract like `MNQZ6`, skips the front month lookup |
 | `connection` | | only trade on the login with this label |
 | `accounts` | | only these account names or ids, out of the target accounts. Example `["APEX-1", "APEX-2"]` |
+| `client_id` | | your own id for the signal. Sending the same `client_id` again returns the first signal and sends nothing |
 | `sent_at` | | when the alert was sent (`"{{timenow}}"`), used to ignore alerts that arrive late |
 | `is_automated` | `true` | passed to Tradovate |
 | `preset` | | a bracket preset from the **Brackets** page (see [take profits and stops](#take-profits-and-stops)) |
@@ -200,6 +208,10 @@ Optional environment variables, set in `.env` (see `.env.example`). In Docker, c
 | `LOCALFILL_RECONNECT_SECONDS` | `60` | how often offline logins are retried, `0` turns it off |
 | `LOCALFILL_ACCOUNT_REFRESH_SECONDS` | `600` | how often the account list reloads (to notice closed accounts), `0` turns it off |
 | `LOCALFILL_MAX_CONTRACTS` | `10` | most contracts one alert may ask for per account (`qty` or the size of `position`). Bigger alerts send nothing. `0` turns it off |
+| `LOCALFILL_MAX_CONTRACTS_PER_SYMBOL` | | the same limit for single products, like `MNQ=48,NQ=3`. A product not listed uses `LOCALFILL_MAX_CONTRACTS` |
+| `LOCALFILL_FILL_POLL_SECONDS` | `1` | how often new fills are read from Tradovate (take profits, stops, liquidations), `0` turns it off |
+| `LOCALFILL_RISK_POLL_SECONDS` | `10` | how often the prop firm's lock (daily loss limit) is read while fills are polled |
+| `LOCALFILL_DAILY_FLATTEN_ET` | | flattens every target account Monday to Friday at this New York time, like `16:44:30`. Empty turns it off |
 | `LOCALFILL_DATA_DIR` | `data` (`/data` in Docker) | database and key location |
 | `LOCALFILL_STATIC_DIR` | `static` (`/app/static` in Docker) | built dashboard files |
 | `LOCALFILL_INGRESS_HOST` / `_PORT` | `127.0.0.1` / `8010` | webhook server address |
@@ -209,6 +221,7 @@ Optional environment variables, set in `.env` (see `.env.example`). In Docker, c
 
 - **Webhook:** the token in the URL is its only protection, so treat the URL like a password. A wrong token gets a plain 404, and access logs are off so the token stays out of the logs. If it leaks, call `POST /api/settings/webhook-token/regenerate`.
 - **Dashboard:** password stored as a scrypt hash, with an HttpOnly, same-site session cookie. There is no HTTPS, so never publish port 8011. For remote access, use a VPN such as Tailscale.
+- **API tokens:** for programs, made and revoked on the Settings page, stored as a sha256 hash. A token can trade, but it can't unblock accounts, raise size limits, add connections, change dry run or resume after a halt.
 - **Tradovate passwords:** encrypted, but the key (`secret.key`) is in the same volume. This protects a leaked database file, not a leaked volume.
 - **Forgot the dashboard password:** run `docker compose exec localfill python -m app.reset_password`, then `docker compose restart localfill`.
 
@@ -259,7 +272,7 @@ api/app/
   crypto.py        password encryption
   models.py        request and answer shapes
   routes/          http endpoints
-  services/        dispatcher, signals, connections, reports, brackets
+  services/        dispatcher, signals, batches, fills, risk, connections, reports, brackets, tokens, schedule
   tradovate/       login, api client, front month lookup
   devtools/        fake Tradovate (also fakes fills, positions, P/L)
 api/tests/
@@ -277,12 +290,12 @@ The dashboard only uses the API, so you can build your own: [docs/frontend.md](d
 ## Future features (to add)
 
 - Trailing stops on brackets (Tradovate supports them, localfill doesn't send them yet)
-- Per-account size multiplier and risk limits such as a daily loss stop
+- Per-account size multiplier
 - Copying trades placed by hand on a lead account
 - Testing position sync, rollover detection, flatten's order cancelling, throttling and the reconnect loop on a real account
-- Websocket streaming from Tradovate (everything is polled)
+- Websocket streaming from Tradovate (everything is polled, fills every second)
 - Testing orders, flatten and P/L on a real account. The fill pairs in `/api/pnl` assume Tradovate only returns the requested account's pairs. `realized_pnl` comes straight from Tradovate
-- Dashboard sessions are in memory, so a restart logs you out
+- Dashboard sessions are in memory, so a restart logs you out (API tokens keep working)
 
 ## Support
 

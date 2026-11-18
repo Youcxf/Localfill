@@ -74,3 +74,36 @@ header.dry .dot {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* the kill switch, always in reach */
+.halt {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(240, 100, 91, 0.6);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+header.dry .halt {
+  border-color: #b3261e;
+  color: #b3261e;
+}
+
+/* halted turns the whole bar red until someone resumes */
+header.halted {
+  border-bottom-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+header.halted .live {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+header.halted .off {
+  border-color: #fff;
+  color: #fff;
+}

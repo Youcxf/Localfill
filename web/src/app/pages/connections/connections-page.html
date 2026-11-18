@@ -23,9 +23,25 @@
             [disabled]="busy() === card.label"
             (click)="reconnect(card)"
           >
-            {{ busy() === card.label ? 'Logging in…' : 'Reconnect' }}
+            {{ busy() === card.label ? 'Working…' : 'Reconnect' }}
           </button>
-          <button type="button" class="link danger" [attr.aria-label]="'Remove ' + card.label" (click)="remove(card)">
+          @if (card.online) {
+            <button
+              type="button"
+              class="link plain"
+              [attr.aria-label]="'Load the accounts of ' + card.label + ' again'"
+              [disabled]="busy() === card.label"
+              (click)="refreshAccounts(card)"
+            >
+              Refresh accounts
+            </button>
+          }
+          <button
+            type="button"
+            class="link danger"
+            [attr.aria-label]="'Remove ' + card.label"
+            (click)="remove(card)"
+          >
             Remove
           </button>
         </div>
@@ -37,28 +53,83 @@
         }
 
         @if (card.accounts.length) {
-          <p class="hint">Ticked accounts receive orders. If none are ticked, every active account does.</p>
+          <p class="hint">
+            Ticked accounts receive orders. If none are ticked, every active account does. A blocked
+            account is never traded or flattened, so block your own accounts before choosing
+            targets.
+          </p>
           <div class="table">
             <div class="row head">
               <span></span>
               <span>Account</span>
               <span>ID</span>
               <span>Orders</span>
+              <span>Size limit</span>
+              <span></span>
             </div>
             @for (account of card.accounts; track account.id) {
-              <div class="row">
+              <div class="row" [class.blocked]="account.blocked">
                 <button
                   type="button"
                   class="box"
                   role="checkbox"
                   [attr.aria-checked]="account.is_target"
+                  [disabled]="account.blocked"
                   [attr.aria-label]="'Send orders to ' + account.name"
                   (click)="toggle(card, account)"
                 ></button>
-                <span class="mono name">{{ account.name }}</span>
+                <span class="mono name">
+                  {{ account.name }}
+                  @if (account.is_new) {
+                    <span class="new">new</span>
+                  }
+                </span>
                 <span class="mono muted">{{ account.id }}</span>
-                <span [class.muted]="!account.is_target">
-                  {{ account.is_target ? 'receives orders' : 'skipped' }}
+                <span [class.muted]="!account.is_target" [class.amber]="account.blocked">{{
+                  ordersText(account)
+                }}</span>
+                @if (isEditing(card, account)) {
+                  <input
+                    class="input mono limit-input"
+                    placeholder="NQ=1, MNQ=10"
+                    [attr.aria-label]="'Size limits of ' + account.name"
+                    [value]="limitText()"
+                    (input)="limitText.set($any($event.target).value)"
+                    (keydown.enter)="saveLimits(card, account)"
+                    (keydown.escape)="editing.set('')"
+                  />
+                } @else {
+                  <span class="mono" [class.muted]="!formatLimits(account.max_contracts)">
+                    {{ formatLimits(account.max_contracts) || 'server' }}
+                  </span>
+                }
+                <span class="row-actions">
+                  @if (isEditing(card, account)) {
+                    <button type="button" class="link" (click)="saveLimits(card, account)">
+                      Save
+                    </button>
+                    <button type="button" class="link quiet" (click)="editing.set('')">
+                      Cancel
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      class="link quiet"
+                      [attr.aria-label]="'Size limits of ' + account.name"
+                      (click)="editLimits(card, account)"
+                    >
+                      Limit
+                    </button>
+                    <button
+                      type="button"
+                      class="link"
+                      [class.quiet]="!account.blocked"
+                      [attr.aria-label]="(account.blocked ? 'Unblock ' : 'Block ') + account.name"
+                      (click)="block(card, account)"
+                    >
+                      {{ account.blocked ? 'Unblock' : 'Block' }}
+                    </button>
+                  }
                 </span>
               </div>
             }
@@ -71,8 +142,8 @@
   } @empty {
     @if (loaded()) {
       <p class="empty muted">
-        No Tradovate logins yet. Add one and localfill will log in, find its accounts and start sending them
-        your alerts.
+        No Tradovate logins yet. Add one and localfill will log in, find its accounts and start
+        sending them your alerts.
       </p>
     }
   }

@@ -1,5 +1,5 @@
 import { ConnectionHealth } from '../../api/types';
-import { summarize, toCard } from './connection-cards';
+import { formatLimits, ordersText, parseLimits, summarize, toCard } from './connection-cards';
 
 function connection(changes: Partial<ConnectionHealth> = {}): ConnectionHealth {
   return {
@@ -11,9 +11,26 @@ function connection(changes: Partial<ConnectionHealth> = {}): ConnectionHealth {
     token_expires_at: null,
     seconds_to_expiry: 4465,
     accounts: [
-      { id: 1001, name: 'DEMO1001', active: true, is_target: true },
-      { id: 1002, name: 'DEMO1002', active: true, is_target: false },
+      {
+        id: 1001,
+        name: 'DEMO1001',
+        active: true,
+        is_target: true,
+        blocked: false,
+        is_new: false,
+        max_contracts: {},
+      },
+      {
+        id: 1002,
+        name: 'DEMO1002',
+        active: true,
+        is_target: false,
+        blocked: false,
+        is_new: false,
+        max_contracts: {},
+      },
     ],
+    blocked_accounts: [],
     last_error: null,
     ...changes,
   };
@@ -58,11 +75,47 @@ describe('summary line', () => {
   });
 
   it('uses the singular for one login and one account', () => {
-    const one = connection({ accounts: [{ id: 1, name: 'DEMO1', active: true, is_target: true }] });
+    const account = {
+      id: 1,
+      name: 'DEMO1',
+      active: true,
+      is_target: true,
+      blocked: false,
+      is_new: false,
+      max_contracts: {},
+    };
+    const one = connection({ accounts: [account] });
     expect(summarize([one])).toBe('1 login, 1 account, 1 receiving orders');
   });
 
   it('works with no connections', () => {
     expect(summarize([])).toBe('0 logins, 0 accounts, 0 receiving orders');
+  });
+});
+
+describe('account rows', () => {
+  const account = {
+    id: 1,
+    name: 'A',
+    active: true,
+    is_target: true,
+    blocked: false,
+    is_new: false,
+    max_contracts: {},
+  };
+
+  it('says what happens to the orders of each account', () => {
+    expect(ordersText(account)).toBe('receives orders');
+    expect(ordersText({ ...account, is_target: false })).toBe('skipped');
+    expect(ordersText({ ...account, active: false })).toBe('closed');
+    expect(ordersText({ ...account, blocked: true })).toBe('blocked, never traded');
+  });
+
+  it('shows and reads the size limits of an account', () => {
+    expect(formatLimits({ NQ: 1, MNQ: 10 })).toBe('NQ 1, MNQ 10');
+    expect(formatLimits({})).toBe('');
+    expect(parseLimits('nq 1, MNQ=10,')).toEqual({ NQ: 1, MNQ: 10 });
+    expect(parseLimits('')).toEqual({});
+    expect(parseLimits('NQ one')).toBeNull();
   });
 });

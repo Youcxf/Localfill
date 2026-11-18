@@ -1,7 +1,18 @@
 import asyncio
 import logging
 
-from app.models import AccountPnl, FillPair, OpenPosition, PnlResponse, PositionsResponse
+from app.models import (
+    AccountPnl,
+    AccountPosition,
+    AccountRisk,
+    AccountState,
+    FillPair,
+    OpenPosition,
+    PnlResponse,
+    PositionsResponse,
+)
+from app.services.dispatcher import OPEN_ORDER
+from app.services.fills import day_text
 from app.tradovate.client import TradovateError
 
 logger = logging.getLogger(__name__)
@@ -9,9 +20,12 @@ logger = logging.getLogger(__name__)
 
 # read only stuff for the dashboard: open positions and pnl
 class Reports:
-    def __init__(self, manager, resolver):
+    def __init__(self, manager, resolver, risk=None, fills=None):
         self.manager = manager
         self.resolver = resolver
+        # the firm's lock on each account, and the fills localfill has seen (for the fees)
+        self.risk = risk
+        self.fills = fills
 
     # every (connection, account id) we trade on
     def all_accounts(self):
@@ -117,3 +131,105 @@ class Reports:
             trade_date=trade_date,
             fill_pairs=fill_pairs,
         )
+
+    # ---------- balances ----------
+
+    # every target account with its real balance, positions and risk state.
+    # every=True: every account that is not blocked
+    async def accounts(self, every=False):
+        conns = [conn for conn in self.manager.pick() if conn.account_names]
+        batches = await asyncio.gather(*(self.accounts_of(conn, every) for conn in conns))
+        return [state for batch in batches for state in batch]
+
+    async def accounts_of(self, conn, every):
+        targets = conn.target_account_ids()
+        if every:
+            blocked = conn.blocked_ids()
+            ids = [i for i in conn.account_names if i not in blocked]
+        else:
+            ids = targets
+        if not ids:
+            return []
+        # the cash list and the risk state come for every account of a login at once
+        cash_rows, risk = await asyncio.gather(self.cash_rows(conn), self.risk_of(conn))
+        return await asyncio.gather(*(self.account_state(conn, i, i in targets, cash_rows, risk) for i in ids))
+
+    async def account_state(self, conn, account_id, is_target, cash_rows, risk):
+        state = AccountState(
+            connection=conn.label,
+            account_id=account_id,
+            name=conn.account_names.get(account_id, str(account_id)),
+            active=conn.account_active.get(account_id, True),
+            is_target=is_target,
+            risk=risk.get(account_id) or AccountRisk(),
+        )
+        snapshot, positions, working = await asyncio.gather(
+            self.snapshot(conn, account_id),
+            self.account_positions(conn, account_id),
+            self.working_orders(conn, account_id),
+            return_exceptions=True,
+        )
+        problems = []
+
+        # the latest cash row: the fallback for the snapshot, and the trade date
+        own_rows = [c for c in cash_rows if c.get("accountId") == account_id]
+        latest = max(own_rows, key=lambda c: c.get("timestamp", ""), default={})
+        state.trade_date = day_text(latest.get("tradeDate"))
+        if isinstance(snapshot, dict):
+            state.cash_balance = snapshot.get("totalCashValue")
+            state.realized_pnl_today = snapshot.get("realizedPnL")
+            state.open_pnl = snapshot.get("openPnL")
+            state.net_liq = snapshot.get("netLiq")
+        else:
+            problems.append(f"balance: {snapshot}")
+        if state.cash_balance is None:
+            state.cash_balance = latest.get("amount")
+        if state.realized_pnl_today is None:
+            state.realized_pnl_today = latest.get("realizedPnL")
+
+        if isinstance(positions, list):
+            state.positions = positions
+        else:
+            problems.append(f"positions: {positions}")
+        if isinstance(working, int):
+            state.working_orders = working
+        else:
+            problems.append(f"orders: {working}")
+        if self.fills:
+            state.fees_today = await self.fills.fees_on(conn.label, account_id, state.trade_date)
+        state.error = "; ".join(problems) or None
+        return state
+
+    async def cash_rows(self, conn):
+        try:
+            rows = await conn.request("GET", "/cashBalance/list") or []
+        except TradovateError as exc:
+            logger.warning("[%s] could not read cash balance: %s", conn.label, exc)
+            return []
+        return rows if isinstance(rows, list) else []
+
+    # read again every time: this is also how a lock or unlock gets noticed when nothing polls
+    async def risk_of(self, conn):
+        if not self.risk:
+            return {}
+        return await self.risk.refresh(conn)
+
+    # tradovate's own numbers: total cash, realized and open p/l, net liquidation value
+    async def snapshot(self, conn, account_id):
+        data = await conn.request("POST", "/cashBalance/getcashbalancesnapshot", {"accountId": account_id})
+        if not isinstance(data, dict) or data.get("errorText"):
+            raise TradovateError((data or {}).get("errorText") or "no snapshot")
+        return data
+
+    async def account_positions(self, conn, account_id):
+        rows = await conn.request("GET", f"/position/list?accountId={account_id}") or []
+        found = []
+        for row in rows:
+            if not row.get("netPos") or row.get("contractId") is None or row.get("accountId", account_id) != account_id:
+                continue
+            found.append(AccountPosition(contract=await self.resolver.name_for_id(conn, row["contractId"]), net_pos=row["netPos"]))
+        return found
+
+    async def working_orders(self, conn, account_id):
+        orders = await conn.request("GET", f"/order/deps?masterid={account_id}") or []
+        return sum(1 for o in orders if o.get("ordStatus") in OPEN_ORDER and o.get("accountId", account_id) == account_id)

@@ -6,12 +6,17 @@ import secrets
 from app.crypto import Crypto
 from app.db import Database
 from app.lock import DataDirLock
+from app.services.batches import Batches
 from app.services.brackets import Brackets
 from app.services.connections import ConnectionManager
 from app.services.dispatcher import Dispatcher
 from app.services.events import EventBus
+from app.services.fills import FillWatcher, OrderRoles
 from app.services.reports import Reports
+from app.services.risk import RiskWatch
+from app.services.schedule import DailyFlatten
 from app.services.signals import SignalProcessor
+from app.services.tokens import ApiTokens
 from app.tradovate.contracts import ContractResolver
 
 logger = logging.getLogger(__name__)
@@ -41,11 +46,19 @@ class AppContext:
         await self.db.open()
         self.crypto = Crypto(os.path.join(self.settings.data_dir, "secret.key"))
 
-        self.manager = ConnectionManager(self.db, self.crypto, self.settings)
+        self.tokens = ApiTokens(self.db)
+        self.manager = ConnectionManager(self.db, self.crypto, self.settings, self.events)
         self.brackets = Brackets(self.db)
-        self.dispatcher = Dispatcher(self.manager, self.resolver, self.brackets)
-        self.reports = Reports(self.manager, self.resolver)
+        self.roles = OrderRoles(self.db)
+        self.risk = RiskWatch(self.events)
+        self.dispatcher = Dispatcher(self.manager, self.resolver, self.brackets, self.roles, self.risk)
+        self.fills = FillWatcher(
+            self.db, self.manager, self.resolver, self.roles, self.brackets, self.risk, self.events, self.settings
+        )
+        self.reports = Reports(self.manager, self.resolver, self.risk, self.fills)
         self.processor = SignalProcessor(self.db, self.dispatcher, self.events, self.settings)
+        self.batches = Batches(self.db, self.processor, self.dispatcher, self.manager, self.brackets)
+        self.daily_flatten = DailyFlatten(self.processor, self.settings)
 
         # the webhook token is created once and then kept
         token = await self.db.get_setting("webhook_token")
@@ -54,9 +67,12 @@ class AppContext:
             await self.db.set_setting("webhook_token", token)
         self.webhook_token = token
 
+        await self.processor.load()
         await self.processor.close_unfinished()
         await self.manager.load_saved()
         self.manager.start_background()
+        self.fills.start()
+        self.daily_flatten.start()
 
     # runs a coroutine in the background (keeps a reference so it is not garbage collected)
     def spawn(self, coroutine):
@@ -69,6 +85,8 @@ class AppContext:
         if self.tasks:
             logger.info("waiting for %d running signal(s)", len(self.tasks))
             await asyncio.wait(self.tasks, timeout=8)
+        await self.daily_flatten.stop()
+        await self.fills.stop()
         await self.manager.stop_all()
         await self.db.close()
         self.lock.release()

@@ -5,3 +5,5 @@ aiosqlite==0.22.1
 pydantic==2.13.5
 pydantic-settings==2.15.0
 cryptography==50.0.1
+# time zones for the daily flatten (windows and slim images have none)
+tzdata==2026.6

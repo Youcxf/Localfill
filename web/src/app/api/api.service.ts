@@ -1,9 +1,13 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import {
+  AccountState,
+  ApiToken,
+  ApiTokenCreated,
   AuthStatus,
   ConnectionConfig,
   ConnectionHealth,
+  HaltResponse,
   PnlResponse,
   PositionsResponse,
   Preset,
@@ -66,6 +70,32 @@ export class ApiService {
     return this.http.post<Settings>('/api/settings/webhook-token/regenerate', {});
   }
 
+  // ---------- api tokens, for programs like a trading bot ----------
+
+  tokens() {
+    return this.http.get<ApiToken[]>('/api/tokens');
+  }
+
+  // the answer is the only time the token is shown
+  createToken(name: string) {
+    return this.http.post<ApiTokenCreated>('/api/tokens', { name });
+  }
+
+  revokeToken(id: number) {
+    return this.http.delete<void>('/api/tokens/' + id);
+  }
+
+  // ---------- the kill switch ----------
+
+  // flattens every target account now and refuses new buys and sells until resume
+  halt() {
+    return this.http.post<HaltResponse>('/api/halt', {});
+  }
+
+  resume() {
+    return this.http.post<HaltResponse>('/api/resume', {});
+  }
+
   // ---------- connections ----------
 
   connections() {
@@ -84,6 +114,26 @@ export class ApiService {
 
   reconnect(label: string) {
     return this.http.post<ConnectionHealth>(this.connectionUrl(label) + '/reconnect', {});
+  }
+
+  // reloads the account list, so an account you just bought shows up
+  refreshAccounts(label: string) {
+    return this.http.post<ConnectionHealth>(this.connectionUrl(label) + '/refresh', {});
+  }
+
+  // accounts that are never traded or flattened (the full list)
+  setBlocked(label: string, blocked: string[]) {
+    return this.http.put<ConnectionHealth>(this.connectionUrl(label) + '/blocked', {
+      blocked_accounts: blocked,
+    });
+  }
+
+  // one account's own size limits per product, like { NQ: 1, MNQ: 10 }. empty removes them
+  setLimits(label: string, account: string, maxContracts: Record<string, number>) {
+    return this.http.put<ConnectionHealth>(this.connectionUrl(label) + '/limits', {
+      account,
+      max_contracts: maxContracts,
+    });
   }
 
   deleteConnection(label: string) {
@@ -118,6 +168,11 @@ export class ApiService {
 
   pnl() {
     return this.http.get<PnlResponse>('/api/pnl');
+  }
+
+  // real balances, positions and the firm's lock, for every target account
+  accounts(all = false) {
+    return this.http.get<AccountState[]>('/api/accounts', { params: { all } });
   }
 
   // newest first. give a status to only get signals in that state

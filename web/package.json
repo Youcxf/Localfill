@@ -1,6 +1,6 @@
 {
   "name": "localfill",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "scripts": {
     "ng": "ng",
     "prestart": "node scripts/copy-images.mjs",

@@ -72,6 +72,12 @@ function bracketText(record: SignalRecord): string {
   if (p.preset) {
     words.push(p.preset);
   }
+  // take profits without points come from the preset
+  for (const tp of p.take_profits ?? []) {
+    if (tp.points != null) {
+      words.push(`${tp.qty} at +${tp.points}`);
+    }
+  }
   if (p.stop_loss != null) {
     words.push(`stop ${p.stop_loss}`);
   }

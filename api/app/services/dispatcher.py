@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 
 from app.models import AccountResult, SignalResult
@@ -16,6 +17,10 @@ OPEN_ORDER = ("Working", "Suspended", "PendingNew", "PendingReplace")
 MULTIBRACKET = 2
 # in /orderStrategyLink the entry order has this label, the brackets have "0", "1"...
 ENTRY_LABEL = "256"
+# an order that is not working anymore, so it can not be cancelled (and does not need to be)
+CANCELLED = ("Canceled", "Cancelled", "Expired")
+# how old the firm's risk state may be before an order reads it again (the fill watcher keeps it fresh)
+RISK_MAX_AGE = 15.0
 
 
 # rounds a price or a distance to the contract's tick size
@@ -26,6 +31,30 @@ def to_tick(value, tick):
 # MNQZ6 -> MNQ (tradovate names end with a month letter and one year digit)
 def product_of(contract_name):
     return contract_name[:-2] if len(contract_name) > 2 else contract_name
+
+
+# the product a signal trades: MNQ for "symbol": "MNQ", and for "contract": "MNQZ6" or "symbol": "MNQZ6"
+def product_for(signal, products=()):
+    if signal.contract:
+        return product_of(signal.contract)
+    symbol = signal.symbol or ""
+    if symbol not in products and re.fullmatch(r"[A-Z0-9]+[FGHJKMNQUVXZ]\d", symbol):
+        return product_of(symbol)
+    return symbol
+
+
+# contracts per account a signal asks for
+def size_of(signal, plan=None):
+    if plan:
+        return plan.total
+    if signal.position is not None:
+        return abs(signal.position)
+    return signal.qty
+
+
+# an answer that is already known, so it can wait in the same gather as the real orders
+async def ready(result):
+    return result
 
 
 def elapsed_ms(start):
@@ -44,10 +73,13 @@ def failure_of(data):
 
 # sends signals to every account of every connection, all at the same time
 class Dispatcher:
-    def __init__(self, manager, resolver, brackets):
+    def __init__(self, manager, resolver, brackets, roles=None, risk=None):
         self.manager = manager
         self.resolver = resolver
         self.brackets = brackets
+        # what each order was for (so fills can say it), and the firm's lock on each account
+        self.roles = roles
+        self.risk = risk
 
     async def run(self, signal):
         plan = None
@@ -61,29 +93,95 @@ class Dispatcher:
             return await self.flatten(signal)
         return await self.place_orders(signal, plan)
 
-    # refuses alerts asking for more than max_contracts per account
+    # refuses alerts asking for more than the server allows per account: the product's own
+    # limit (LOCALFILL_MAX_CONTRACTS_PER_SYMBOL) or else LOCALFILL_MAX_CONTRACTS
     def size_problem(self, signal, plan=None):
-        limit = self.manager.settings.max_contracts
-        if limit <= 0 or signal.action == "flatten":
+        if signal.action == "flatten":
             return None
-        if plan:
-            size = plan.total
-        elif signal.position is not None:
-            size = abs(signal.position)
-        else:
-            size = signal.qty
-        if size > limit:
+        settings = self.manager.settings
+        limits = settings.symbol_limits
+        product = product_for(signal, limits)
+        size = size_of(signal, plan)
+        if product in limits:
+            # 0 here means the product is not allowed at all
+            if size > limits[product]:
+                return (f"asks for {size} {product}, the limit is {limits[product]} "
+                        "(LOCALFILL_MAX_CONTRACTS_PER_SYMBOL), nothing was sent")
+            return None
+        limit = settings.max_contracts
+        if limit > 0 and size > limit:
             return f"asks for {size} contracts, the limit is {limit} (LOCALFILL_MAX_CONTRACTS), nothing was sent"
         return None
 
-    # the accounts of one connection this signal goes to: its target accounts, narrowed down
-    # to signal.accounts when the alert names some
-    def accounts_for(self, conn, signal):
-        targets = conn.target_account_ids()
+    # the account's own limit (like a prop firm's scaling plan), checked after the server's
+    def account_size_problem(self, conn, account_id, signal, plan, product):
+        if signal.action == "flatten":
+            return None
+        limit = conn.account_limit(account_id, product)
+        size = size_of(signal, plan)
+        if limit is None or size <= limit:
+            return None
+        name = conn.account_names.get(account_id, str(account_id))
+        return f"account {name} is limited to {limit} {product}, this asks for {size}. nothing sent"
+
+    # the (connection, account id) pairs this signal goes to, and an error result for each account it
+    # names that can not be traded. without signal.accounts that is every target account
+    def pick_accounts(self, conns, signal):
+        pairs, refused = [], []
         if not signal.accounts:
-            return targets
-        wanted = {conn.account_ids.get(key) for key in signal.accounts}
-        return [account_id for account_id in targets if account_id in wanted]
+            for conn in conns:
+                pairs += [(conn, account_id) for account_id in conn.target_account_ids()]
+            return pairs, refused
+
+        seen = set()
+        for key in signal.accounts:
+            owners = [conn for conn in conns if key in conn.account_ids]
+            if not owners:
+                where = ", ".join(conn.label for conn in conns) or "any connection with its accounts loaded"
+                label = conns[0].label if len(conns) == 1 else (signal.connection or "")
+                refused.append(self.refusal(label, 0, key, f"account {key} not found on connection {where}"))
+                continue
+            for conn in owners:
+                account_id = conn.account_ids[key]
+                if (conn.label, account_id) in seen:
+                    continue
+                seen.add((conn.label, account_id))
+                problem = self.account_problem(conn, account_id, key)
+                if problem:
+                    refused.append(self.refusal(conn.label, account_id, conn.account_names.get(account_id, key), problem))
+                else:
+                    pairs.append((conn, account_id))
+        return pairs, refused
+
+    # why a named account can not be traded, None if it can
+    def account_problem(self, conn, account_id, key):
+        if conn.is_blocked(account_id):
+            return f"account {key} is blocked"
+        if not conn.account_active.get(account_id, True):
+            return f"account {key} is closed or inactive"
+        if account_id not in conn.target_account_ids():
+            return f"account {key} is not a target"
+        return None
+
+    def refusal(self, label, account_id, name, error):
+        return AccountResult(connection=label, account_id=account_id, account_name=name, success=False, latency_ms=0, error=error)
+
+    # the firm's lock on every account of these connections (the daily loss limit). an unknown state is not a lock
+    async def risk_states(self, pairs):
+        if not self.risk:
+            return {}
+        conns = {conn.label: conn for conn, _ in pairs}
+        states = await asyncio.gather(*(self.risk.get(conn, RISK_MAX_AGE) for conn in conns.values()))
+        return dict(zip(conns, states))
+
+    # writes down what an order is for, so its fills can say it later. never stops an order
+    async def note(self, conn, account_id, order_id, role, strategy_id=None):
+        if not self.roles or order_id is None:
+            return
+        try:
+            await self.roles.remember(conn.label, account_id, order_id, role, strategy_id)
+        except Exception as exc:
+            logger.warning("[%s] could not write down order %s: %s", conn.label, order_id, exc)
 
     # the connections we can trade on, plus a warning for each one we have to skip
     def usable_connections(self, signal):
@@ -133,16 +231,26 @@ class Dispatcher:
         contract_id = await self.resolver.resolve_id(conns[0], contract)
         tick = await self.resolver.tick_size(conns[0], contract) if plan else None
 
-        tasks = []
-        for conn in conns:
-            for account_id in self.accounts_for(conn, signal):
-                if plan:
-                    tasks.append(self.place_bracket(conn, account_id, signal, plan, contract, contract_id, tick))
-                elif signal.position is None:
-                    tasks.append(self.place_plain(conn, account_id, signal, contract, contract_id))
-                else:
-                    tasks.append(self.move_to_position(conn, account_id, signal, contract, contract_id))
-        results = await asyncio.gather(*tasks)
+        pairs, refused = self.pick_accounts(conns, signal)
+        risk = await self.risk_states(pairs)
+        # one job per account, in the order of the accounts (a refusal is an answer right away)
+        jobs = [ready(result) for result in refused]
+        for conn, account_id in pairs:
+            name = conn.account_names.get(account_id, str(account_id))
+            problem = self.account_size_problem(conn, account_id, signal, plan, product_of(contract))
+            lock = risk.get(conn.label, {}).get(account_id)
+            # going flat is still allowed on a locked account (liquidate only)
+            if not problem and lock and lock.locked and signal.position != 0:
+                problem = f"account {name} is locked by the firm: {lock.reason}. nothing sent"
+            if problem:
+                jobs.append(ready(self.refusal(conn.label, account_id, name, problem)))
+            elif plan:
+                jobs.append(self.place_bracket(conn, account_id, signal, plan, contract, contract_id, tick))
+            elif signal.position is None:
+                jobs.append(self.place_plain(conn, account_id, signal, contract, contract_id))
+            else:
+                jobs.append(self.move_to_position(conn, account_id, signal, contract, contract_id))
+        results = await asyncio.gather(*jobs)
         return self.summarize(signal, contract, results, warnings, plan)
 
     # a plain buy or sell. when a bracket localfill started is still open on this account, tradovate
@@ -214,7 +322,7 @@ class Dispatcher:
             elif signal.position == 0 or (signal.position > 0) != (current > 0):
                 # going flat or to the other side: close it with its take profits and stop first,
                 # a plain order would leave them working
-                closed = await self.flatten_one(conn, account_id, contract_id)
+                closed = await self.flatten_one(conn, account_id, contract_id, confirm=False)
                 if not closed.success or not await self.wait_for_position(conn, account_id, contract_id, 0):
                     closed.success = False
                     closed.error = closed.error or "closed the bracket but tradovate does not show it flat yet, nothing else sent"
@@ -298,6 +406,7 @@ class Dispatcher:
             data = await conn.request("POST", "/order/placeorder", payload, retry=False)
             order_id = data.get("orderId") if isinstance(data, dict) else None
             failure = failure_of(data)
+            await self.note(conn, account_id, order_id, "plain")
 
             status = None
             fill_price = None
@@ -403,10 +512,15 @@ class Dispatcher:
             # what the account already holds of this contract
             positions = await self.open_positions(conn, account_id)
             current = sum(p.get("netPos", 0) for p in positions if p.get("contractId") == contract_id)
+            # after a rollover the account can still hold last month's contract, a bracket in the
+            # new one would open on top of it (even with skip, the new month looks flat)
+            old = await self.other_months(conn, positions, contract, contract_id)
+            if old:
+                return answer(False, error=f"still holds {', '.join(old)}, roll it or flatten it first. nothing sent")
             if current and plan.if_open == "skip":
                 return answer(True, status=f"skipped, it already holds {current:g}")
             if current and (plan.if_open == "replace" or current * side < 0):
-                closed = await self.flatten_one(conn, account_id, contract_id)
+                closed = await self.flatten_one(conn, account_id, contract_id, confirm=False)
                 if not closed.success:
                     return answer(False, error=f"could not close the {current:g} it holds, nothing sent: {closed.error}")
                 if not await self.wait_for_position(conn, account_id, contract_id, 0):
@@ -429,6 +543,7 @@ class Dispatcher:
             await self.brackets.remember(conn.label, account_id, contract_id, strategy_id)
 
             entry_id = await self.entry_order(conn, strategy_id)
+            await self.note(conn, account_id, entry_id, "entry", strategy_id)
             if entry_id is None:
                 return answer(False, error="tradovate started the bracket but shows no entry order, check this account",
                               response=response, strategy_id=strategy_id)
@@ -441,6 +556,9 @@ class Dispatcher:
             else:
                 # the brackets show up right after the fill, or right away (waiting) for limit and stop entries
                 orders = await self.bracket_orders(conn, strategy_id, plan)
+                for order_ids in (orders or {}).values():
+                    for order_id in order_ids:
+                        await self.note(conn, account_id, order_id, "bracket", strategy_id)
                 if orders is None:
                     error = "the take profits and stop did not show up on tradovate, check this account"
                 elif plan.stop_price is not None and signal.order_type == "market" and fill_price is not None:
@@ -614,11 +732,10 @@ class Dispatcher:
         if name and conns:
             contract_id = await self.resolver.resolve_id(conns[0], name)
 
-        tasks = []
-        for conn in conns:
-            for account_id in self.accounts_for(conn, signal):
-                tasks.append(self.flatten_one(conn, account_id, contract_id))
-        results = await asyncio.gather(*tasks)
+        pairs, refused = self.pick_accounts(conns, signal)
+        jobs = [ready(result) for result in refused]
+        jobs += [self.flatten_one(conn, account_id, contract_id) for conn, account_id in pairs]
+        results = await asyncio.gather(*jobs)
         return self.summarize(signal, name, results, warnings)
 
     # cancels the account's orders that can still fill (only for one contract if given).
@@ -639,17 +756,50 @@ class Dispatcher:
                 continue
             try:
                 answer = await conn.request("POST", "/order/cancelorder", {"orderId": order["id"]})
+                failure = failure_of(answer)
             except TradovateError as exc:
-                errors.append(f"could not cancel order {order.get('id')}: {exc}")
-                continue
-            failure = failure_of(answer)
-            if failure:
-                errors.append(f"could not cancel order {order.get('id')}: {failure}")
-            else:
+                failure = str(exc)
+            if not failure:
                 cancelled += 1
+                continue
+            # cancelling one leg of a bracket makes tradovate cancel the other leg itself (oco), so
+            # the cancel of that one comes back "TooLate". an order that is not working anymore is done
+            status = await self.order_status(conn, order["id"])
+            if status in CANCELLED:
+                cancelled += 1
+            elif status is None or status in OPEN_ORDER:
+                errors.append(f"could not cancel order {order.get('id')}: {failure}")
         return cancelled
 
-    async def flatten_one(self, conn, account_id, contract_id):
+    # tradovate's status of one order now, None if it can not be read
+    async def order_status(self, conn, order_id):
+        try:
+            data = await conn.request("GET", f"/order/item?id={order_id}")
+        except TradovateError:
+            return None
+        return data.get("ordStatus") if isinstance(data, dict) else None
+
+    # what is left of the position after a close, read again until it is flat (or 3 seconds passed).
+    # None when tradovate's positions can not be read
+    async def left_after_close(self, conn, account_id, contract_id, tries=12, delay=0.25):
+        left = None
+        for attempt in range(tries):
+            try:
+                positions = await self.open_positions(conn, account_id)
+            except TradovateError:
+                return left
+            if contract_id is not None:
+                positions = [p for p in positions if p.get("contractId") == contract_id]
+            left = sum(p.get("netPos", 0) for p in positions)
+            if not positions:
+                return 0
+            if attempt < tries - 1:
+                await asyncio.sleep(delay)
+        return left
+
+    # confirm: read the position again afterwards and fail if it is not flat. the callers that
+    # trade right after closing wait for the position themselves, so they turn it off
+    async def flatten_one(self, conn, account_id, contract_id, confirm=True):
         account_name = conn.account_names.get(account_id, str(account_id))
         start = time.monotonic()
         try:
@@ -671,6 +821,7 @@ class Dispatcher:
                     latency_ms=elapsed_ms(start),
                     status=f"cancelled {cancelled} order(s), nothing to close" if cancelled else "nothing to close",
                     error="; ".join(errors) or None,
+                    net_pos=0,
                 )
 
             last_response = None
@@ -685,6 +836,17 @@ class Dispatcher:
                 failure = failure_of(last_response)
                 if failure:
                     errors.append(failure)
+                elif isinstance(last_response, dict):
+                    await self.note(conn, account_id, last_response.get("orderId"), "flatten")
+
+            # "closed" is checked, not assumed
+            left = None
+            if confirm and not errors:
+                left = await self.left_after_close(conn, account_id, contract_id)
+                if left is None:
+                    errors.append("sent the close but could not read the position afterwards, check this account")
+                elif left != 0:
+                    errors.append(f"sent the close but tradovate still shows {left:g} open")
 
             closed_text = f"closed {len(open_positions)} position(s)"
             if cancelled:
@@ -698,6 +860,7 @@ class Dispatcher:
                 status=None if errors else closed_text,
                 error="; ".join(errors) or None,
                 response=last_response if isinstance(last_response, dict) else None,
+                net_pos=left,
             )
         except Exception as exc:
             logger.error("[%s] flatten failed on account %s: %s", conn.label, account_id, exc)

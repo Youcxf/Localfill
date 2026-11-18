@@ -34,6 +34,10 @@ FRONT_MATURITIES = [11, 13]
 POINT_VALUE = {"MNQ": 2.0, "ES": 50.0}
 BASE_PRICE = {"MNQ": 20000.0, "ES": 6000.0}
 TICK_SIZE = {"MNQ": 0.25, "ES": 0.25}
+# fees per contract on every fill: commission and exchange fee
+FEES = {"MNQ": (0.25, 0.37), "ES": (1.0, 1.38)}
+# what every account starts with
+START_BALANCE = 50000.0
 
 # in /orderStrategyLink the entry order has this label, the brackets have "0", "1"...
 ENTRY_LABEL = "256"
@@ -53,6 +57,12 @@ class FakeBroker:
         # (account id, contract id) -> {"netPos": ..., "netPrice": ...}
         self.positions = {}
         self.realized = {a["id"]: 0.0 for a in ACCOUNTS}
+        # account id -> fees paid
+        self.fees_paid = {}
+        # fill id -> its fees
+        self.fill_fees = {}
+        # account id -> the firm's risk state (see lock_account)
+        self.risk = {}
 
         # switches the tests use to make things go wrong
         self.fixed_price = None
@@ -72,8 +82,11 @@ class FakeBroker:
         self.closed_accounts = set()
         self.extra_accounts = []
         self.cancelled_orders = []
-        # seconds every placeorder takes, to test what happens when orders are slow
+        # cancels are refused and the order keeps working
+        self.refuse_cancels = False
+        # seconds every placeorder (and every startOrderStrategy) takes, to test what happens when orders are slow
         self.order_delay = 0.0
+        self.strategy_delay = 0.0
 
         # order strategies (brackets): id -> strategy
         self.strategies = {}
@@ -87,6 +100,30 @@ class FakeBroker:
         self.order_requests = []
         self.strategy_requests = []
         self.modify_requests = []
+
+    # ---------- helpers for the tests ----------
+
+    # the firm locks an account (daily loss limit): it refuses new orders until unlocked
+    def lock_account(self, account_id, action="LiquidateOnlyModeByAutoLiq"):
+        self.risk[account_id] = {"adminAction": action}
+
+    def unlock_account(self, account_id):
+        self.risk[account_id] = {"adminAction": "Normal"}
+
+    def is_locked(self, account_id):
+        return self.risk.get(account_id, {}).get("adminAction", "Normal") != "Normal"
+
+    # an order placed outside localfill: you clicking in tradovate, or the firm closing the
+    # position (admin=True). it fills right away at the current price
+    def place_outside(self, account_id, contract_name, action, qty, admin=False):
+        contract = [c for c in CONTRACTS if c["name"] == contract_name][0]
+        order_id = next(self.ids)
+        self.orders[order_id] = {
+            "id": order_id, "accountId": account_id, "contractId": contract["id"], "action": action,
+            "ordStatus": "Filled", "orderType": "Market", "orderQty": qty, "admin": admin,
+        }
+        self.add_fill(account_id, contract, action, qty, order_id)
+        return order_id
 
     def price_of(self, contract):
         if self.fixed_price is not None:
@@ -163,6 +200,11 @@ class FakeBroker:
             return web.json_response({"failureReason": "InvalidContract", "failureText": "unknown symbol"})
 
         contract = found[0]
+        # a locked account is liquidate only: it may close, not open
+        held = self.positions.get((body["accountId"], contract["id"]), {}).get("netPos", 0)
+        sign = 1 if body["action"] == "Buy" else -1
+        if self.is_locked(body["accountId"]) and not (held * sign < 0 and body["orderQty"] <= abs(held)):
+            return web.json_response({"failureReason": "TradingLocked", "failureText": "liquidate only"})
         order_id = next(self.ids)
         is_market = body["orderType"] == "Market"
         if self.reject_after_accept:
@@ -171,7 +213,7 @@ class FakeBroker:
             status = "Filled" if is_market else "Working"
         self.orders[order_id] = {
             "id": order_id, "accountId": body["accountId"], "contractId": contract["id"],
-            "action": body["action"], "ordStatus": status,
+            "action": body["action"], "ordStatus": status, "admin": False,
         }
         if is_market and status == "Filled":
             self.add_fill(body["accountId"], contract, body["action"], body["orderQty"], order_id)
@@ -183,17 +225,30 @@ class FakeBroker:
         order = self.orders.get(int(request.query["id"]))
         if order is None:
             return web.json_response({"errorText": "not found"}, status=404)
-        return web.json_response(order)
+        return web.json_response(self.public_order(order))
+
+    async def order_items(self, request):
+        ids = [int(i) for i in request.query.get("ids", "").split(",") if i]
+        return web.json_response([self.public_order(self.orders[i]) for i in ids if i in self.orders])
+
+    # the order as tradovate shows it (without the mock's own notes)
+    def public_order(self, order):
+        return {k: v for k, v in order.items() if k != "breakeven"}
 
     def add_fill(self, account_id, contract, action, qty, order_id):
         self.position_snapshot = {key: dict(value) for key, value in self.positions.items()}
         self.stale_position_reads = self.stale_reads_after_fill
         price = self.price_of(contract)
         fill_id = next(self.ids)
+        today = datetime.now(timezone.utc)
         self.fills.append({
             "id": fill_id, "orderId": order_id, "accountId": account_id, "contractId": contract["id"],
             "action": action, "qty": qty, "price": price, "timestamp": now_text(),
+            "tradeDate": {"year": today.year, "month": today.month, "day": today.day},
         })
+        commission, exchange = FEES[contract["name"][:-2]]
+        self.fill_fees[fill_id] = {"id": fill_id, "commission": commission * qty, "exchangeFee": exchange * qty}
+        self.fees_paid[account_id] = self.fees_paid.get(account_id, 0.0) + (commission + exchange) * qty
 
         position = self.positions.setdefault((account_id, contract["id"]), {"netPos": 0, "netPrice": 0.0})
         sign = 1 if action == "Buy" else -1
@@ -244,8 +299,11 @@ class FakeBroker:
     async def start_strategy(self, request):
         body = await request.json()
         self.strategy_requests.append(body)
+        await asyncio.sleep(self.strategy_delay)
         if self.refuse_strategies:
             return web.json_response({"errorText": self.refuse_strategies})
+        if self.is_locked(body["accountId"]):
+            return web.json_response({"errorText": "trading is locked"})
         found = [c for c in CONTRACTS if c["name"] == body["symbol"]]
         if not found:
             return web.json_response({"errorText": "unknown symbol"})
@@ -408,13 +466,22 @@ class FakeBroker:
     async def cancel_order(self, request):
         body = await request.json()
         order = self.orders.get(body["orderId"])
+        if self.refuse_cancels:
+            return web.json_response({"failureReason": "UnknownReason", "failureText": "cancel refused"})
         if order is None or order["ordStatus"] not in ("Working", "Suspended"):
-            return web.json_response({"failureReason": "UnknownReason", "failureText": "not working"})
+            return web.json_response({"failureReason": "UnknownReason", "failureText": "TooLate"})
         order["ordStatus"] = "Canceled"
         self.cancelled_orders.append(order["id"])
         strategy = self.strategies.get(order.get("strategyId"))
         if strategy and order.get("label") == ENTRY_LABEL:
             self.end_strategy(strategy, "ExecutionInterrupted")
+        elif strategy:
+            # like the real one: the take profit and the stop of one bracket cancel each other (oco)
+            for other in self.strategy_orders(strategy):
+                if other["label"] == order["label"] and other["ordStatus"] in ("Working", "Suspended"):
+                    other["ordStatus"] = "Canceled"
+            if not any(o["ordStatus"] in ("Working", "Suspended") for o in self.strategy_orders(strategy)):
+                strategy["status"] = "ExecutionInterrupted"
         return web.json_response({"orderId": order["id"]})
 
     # fills of one order (masterid = order id)
@@ -437,12 +504,47 @@ class FakeBroker:
     async def cash_list(self, request):
         today = datetime.now(timezone.utc)
         rows = []
-        for account in ACCOUNTS:
+        for account in ACCOUNTS + self.extra_accounts:
             rows.append({
                 "accountId": account["id"], "timestamp": now_text(),
                 "tradeDate": {"year": today.year, "month": today.month, "day": today.day},
-                "realizedPnL": self.realized[account["id"]],
+                "realizedPnL": self.realized.get(account["id"], 0.0),
+                "amount": self.cash_of(account["id"]),
             })
+        return web.json_response(rows)
+
+    def cash_of(self, account_id):
+        return START_BALANCE + self.realized.get(account_id, 0.0) - self.fees_paid.get(account_id, 0.0)
+
+    # what the open positions of one account are worth right now
+    def open_pnl(self, account_id):
+        total = 0.0
+        for (owner, contract_id), position in self.positions.items():
+            if owner != account_id or not position["netPos"]:
+                continue
+            contract = [c for c in CONTRACTS if c["id"] == contract_id][0]
+            points = (self.price_of(contract) - position["netPrice"]) * position["netPos"]
+            total += points * POINT_VALUE[contract["name"][:-2]]
+        return total
+
+    async def cash_snapshot(self, request):
+        body = await request.json()
+        account_id = body["accountId"]
+        cash = self.cash_of(account_id)
+        open_pnl = self.open_pnl(account_id)
+        return web.json_response({
+            "totalCashValue": cash, "realizedPnL": self.realized.get(account_id, 0.0),
+            "openPnL": open_pnl, "netLiq": cash + open_pnl, "totalPnL": self.realized.get(account_id, 0.0) + open_pnl,
+        })
+
+    async def fee_list(self, request):
+        return web.json_response(list(self.fill_fees.values()))
+
+    async def risk_list(self, request):
+        rows = []
+        for account in ACCOUNTS + self.extra_accounts:
+            state = self.risk.get(account["id"], {"adminAction": "Normal"})
+            rows.append(dict(state, id=account["id"], userTriggeredLiqOnly=False))
         return web.json_response(rows)
 
 
@@ -468,6 +570,7 @@ def make_app(broker=None):
     app.router.add_get("/v1/product/find", broker.product_find)
     app.router.add_post("/v1/order/placeorder", broker.place_order)
     app.router.add_get("/v1/order/item", broker.order_item)
+    app.router.add_get("/v1/order/items", broker.order_items)
     app.router.add_post("/v1/order/liquidateposition", broker.liquidate)
     app.router.add_get("/v1/position/list", broker.position_list)
     app.router.add_get("/v1/fill/list", broker.fill_list)
@@ -476,6 +579,9 @@ def make_app(broker=None):
     app.router.add_post("/v1/order/cancelorder", broker.cancel_order)
     app.router.add_get("/v1/fillPair/list", broker.pair_list)
     app.router.add_get("/v1/cashBalance/list", broker.cash_list)
+    app.router.add_post("/v1/cashBalance/getcashbalancesnapshot", broker.cash_snapshot)
+    app.router.add_get("/v1/fillFee/list", broker.fee_list)
+    app.router.add_get("/v1/accountRiskStatus/list", broker.risk_list)
     app.router.add_post("/v1/orderStrategy/startOrderStrategy", broker.start_strategy)
     app.router.add_get("/v1/orderStrategy/items", broker.strategy_items)
     app.router.add_get("/v1/orderStrategyLink/deps", broker.strategy_links)
